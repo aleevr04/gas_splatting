@@ -22,7 +22,7 @@ setuptools==70.2.0
 shapely==2.1.2
 six==1.17.0
 sympy==1.14.0
-tifffile==2026.1.28
+tifffile==2026.2.16
 torch==2.10.0+cpu
 torchvision==0.25.0+cpu
 tqdm==4.67.3
