@@ -51,7 +51,7 @@ print("Generating Ground Truth...")
 img_gt = generate_gas_distribution((sim_cfg.grid_res, sim_cfg.grid_res), num_blobs=sim_cfg.num_blobs, gauss_filter=sim_cfg.gauss_filter)
 
 # Simulate integral measurements
-cell_size = sim_cfg.grid_res / sim_cfg.grid_res
+cell_size = sim_cfg.map_size / sim_cfg.grid_res
 measurements_list = simulate_gas_integrals(img_gt, raw_beams, cell_size)
 
 y_true = torch.tensor(measurements_list, dtype=torch.float32, device=DEVICE)
@@ -100,7 +100,7 @@ scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=train_cfg.lr_decay_st
 
 loss_history = []
 
-# Barra de progreso
+# Progress bar
 pbar = tqdm(range(train_cfg.iterations), desc="Training")
 for it in pbar:
     optimizer.zero_grad()
@@ -112,8 +112,7 @@ for it in pbar:
     loss = torch.mean((y_pred - y_true)**2)
     
     # L1 Regularization (sparsity)
-    l1_reg = 0.01 * torch.mean(model.get_concentration())
-    total_loss = loss + l1_reg
+    total_loss = loss + train_cfg.l1_reg * torch.mean(model.get_concentration())
     
     # Backward
     total_loss.backward()
@@ -160,7 +159,7 @@ pos = model.get_pos().detach().cpu().numpy()
 plt.subplot(2, 3, 2)
 plt.title(f"GS Reconstruction")
 plt.imshow(img_pred_gaussian, origin='lower', extent=(0, sim_cfg.map_size, 0, sim_cfg.map_size), cmap='viridis')
-plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5, label='Centros')
+plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5)
 plt.colorbar(label="ppm")
 
 # b. Grid
@@ -169,7 +168,7 @@ img_pred = render_gaussian_map(model, sim_cfg.map_size, DEVICE, sim_cfg.grid_res
 plt.subplot(2, 3, 3)
 plt.title(f"GS Reconstruction (Grid)")
 plt.imshow(img_pred, origin='lower', extent=(0, sim_cfg.map_size, 0, sim_cfg.map_size), cmap='viridis')
-plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5, label='Centros')
+plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5)
 plt.colorbar(label="ppm")
 
 # 3. Loss History

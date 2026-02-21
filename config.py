@@ -24,6 +24,7 @@ class TrainParams:
     lr_decay_step: int = 200
     iterations: int = 1500
     target_loss: float = 1e-5
+    l1_reg: float = 0.1
 
 @dataclass
 class DensificationParams:
