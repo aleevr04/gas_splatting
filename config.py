@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import argparse
+from dataclasses import dataclass, fields
 
 @dataclass
 class InitParams:
@@ -31,3 +32,28 @@ class DensificationParams:
     densify_from: int = 200
     densify_until: int = 800
     densify_interval: int = 200
+
+def parse_args_into_dataclasses(*dataclass_types):
+    parser = argparse.ArgumentParser(description="Gas Splatting parameters")
+    
+    # Add one argument group for each dataclass
+    for dc in dataclass_types:
+        group = parser.add_argument_group(dc.__name__)
+        for f in fields(dc):
+            group.add_argument(
+                f"--{f.name}", 
+                type=f.type, 
+                default=f.default, 
+                help=f"Default: {f.default}"
+            )
+            
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Return dataclasses instances with updated information
+    results = []
+    for dc in dataclass_types:
+        kwargs = {f.name: getattr(args, f.name) for f in fields(dc)}
+        results.append(dc(**kwargs))
+        
+    return results

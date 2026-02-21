@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from config import InitParams, SimulationParams, TrainParams
+from config import InitParams, SimulationParams, TrainParams, parse_args_into_dataclasses
 from gs_model import GasSplattingModel
 from utils.init_utils import lsqr_initialization
 from utils.plot_utils import render_gaussian_map
@@ -18,9 +18,9 @@ from utils.tomo_utils import (
 # ==========================================
 #              CONFIGURATION
 # ==========================================
-init_cfg = InitParams()
-sim_cfg = SimulationParams()
-train_cfg = TrainParams()
+init_cfg, sim_cfg, train_cfg = parse_args_into_dataclasses(
+    InitParams, SimulationParams, TrainParams
+)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
