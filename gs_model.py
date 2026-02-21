@@ -13,15 +13,15 @@ class GasSplattingModel(nn.Module):
         self.num_gaussians = num_gaussians
         self.map_size = map_size
         
-        # --- Parámetros entrenables ---
-        self._pos = nn.Parameter(torch.rand(num_gaussians, 2))
+        # --- Model parameters ---
+        self._pos = nn.Parameter(torch.rand(num_gaussians, 2) * map_size)
         self._concentration = nn.Parameter(torch.rand(num_gaussians))
         self._scale = nn.Parameter(torch.zeros(num_gaussians, 2))
         self._rotation = nn.Parameter(torch.rand(num_gaussians) * 2*torch.pi)
 
-    def initialize_parameters(self, pos, concentration, std):
+    def initialize_gaussians(self, pos, concentration, std):
         """
-        Overwrite random parameters with an informed initialization.
+        Overwrite random model parameters with an informed initialization.
 
         Args:
             pos (Tensor (K, 2)): Initial positions (x, y) in map coordinates.
