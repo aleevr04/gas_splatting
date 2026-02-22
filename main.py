@@ -1,10 +1,14 @@
 import torch
-import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 
-from config import InitParams, SimulationParams, TrainParams, parse_args_into_dataclasses
+from config import (
+    InitParams,
+    SimulationParams,
+    TrainParams,
+    DensificationParams,
+    parse_args_into_dataclasses
+)
 from gs_model import GasSplattingModel
 from trainer import Trainer
 from utils.init_utils import lsqr_initialization
@@ -19,8 +23,8 @@ from utils.tomo_utils import (
 # ==========================================
 #              CONFIGURATION
 # ==========================================
-init_cfg, sim_cfg, train_cfg = parse_args_into_dataclasses(
-    InitParams, SimulationParams, TrainParams
+init_cfg, sim_cfg, train_cfg, densify_cfg = parse_args_into_dataclasses(
+    InitParams, SimulationParams, TrainParams, DensificationParams
 )
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,7 +53,7 @@ u_rays = torch.tensor(np.array(u_list), dtype=torch.float32).to(DEVICE)
 # ------------ Generate GT -------------
 print("Generating Ground Truth...")
 
-img_gt = generate_gas_distribution((sim_cfg.grid_res, sim_cfg.grid_res), num_blobs=sim_cfg.num_blobs, gauss_filter=sim_cfg.gauss_filter)
+img_gt = generate_gas_distribution((sim_cfg.grid_res, sim_cfg.grid_res), num_blobs=sim_cfg.num_blobs, gauss_filter=not sim_cfg.no_gauss_filter)
 
 # Simulate integral measurements
 cell_size = sim_cfg.map_size / sim_cfg.grid_res
@@ -70,7 +74,7 @@ init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
     coarse_res=init_cfg.coarse_res
 )
 
-model = GasSplattingModel(init_cfg.initial_gaussians, sim_cfg.map_size).to(DEVICE)
+model = GasSplattingModel(init_cfg.initial_gaussians, sim_cfg.map_size, densify_cfg).to(DEVICE)
 model.initialize_gaussians(
     init_pos.to(DEVICE), 
     init_concentration.to(DEVICE), 
@@ -91,7 +95,7 @@ plt.show()
 # ==========================================
 print("Starting Gas Splatting traning...")
 
-trainer = Trainer(model, train_cfg)
+trainer = Trainer(model, train_cfg, densify_cfg)
 loss_history = trainer.train(p_rays, u_rays, y_true)
 
 # ==========================================

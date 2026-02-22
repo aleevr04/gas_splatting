@@ -12,7 +12,7 @@ class SimulationParams:
     grid_res: int = 20
     num_beams: int = 30
     num_blobs: int = 5
-    gauss_filter: bool = True
+    no_gauss_filter: bool = False
 
 @dataclass
 class TrainParams:
@@ -41,12 +41,10 @@ def parse_args_into_dataclasses(*dataclass_types):
     for dc in dataclass_types:
         group = parser.add_argument_group(dc.__name__)
         for f in fields(dc):
-            group.add_argument(
-                f"--{f.name}", 
-                type=f.type, 
-                default=f.default, 
-                help=f"Default: {f.default}"
-            )
+            if f.type == bool:
+                group.add_argument(f"--{f.name}", action="store_true", default=f.default, help=f"Default: {f.default}")
+            else:
+                group.add_argument(f"--{f.name}", type=f.type, default=f.default, help=f"Default: {f.default}")
             
     # Parse arguments
     args = parser.parse_args()

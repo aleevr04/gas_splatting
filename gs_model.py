@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+from config import DensificationParams
 from utils.gaussian_utils import (
     compute_predicted_projections,
     inverse_sigmoid,
@@ -8,10 +9,11 @@ from utils.gaussian_utils import (
 )
 
 class GasSplattingModel(nn.Module):
-    def __init__(self, num_gaussians, map_size):
+    def __init__(self, num_gaussians, map_size, densify_cfg: DensificationParams):
         super().__init__()
         self.num_gaussians = num_gaussians
         self.map_size = map_size
+        self.densify_cfg = densify_cfg
         
         # --- Model parameters ---
         self._pos = nn.Parameter(torch.rand(num_gaussians, 2) * map_size)
@@ -103,3 +105,45 @@ class GasSplattingModel(nn.Module):
         concentration = self.get_concentration()
         
         return compute_predicted_projections(pos, covariance_inverse, concentration, p_rays, u_rays)
+
+    # -------- DENSIFICATION ----------
+
+    def _prune_optimizer(self, optimizer: torch.optim.Optimizer, keep_mask):
+        optimizable_tensors = {}
+
+        for group in optimizer.param_groups:
+            stored_state = optimizer.state.get(group["params"][0], None)
+            if stored_state is not None:
+                # Update optimizer's internal state
+                stored_state["exp_avg"] = stored_state["exp_avg"][keep_mask]
+                stored_state["exp_avg_sq"] = stored_state["exp_avg_sq"][keep_mask]
+
+                # Remove old state
+                del optimizer.state[group["params"][0]]
+                
+                # New param
+                group["params"][0] = nn.Parameter((group["params"][0][keep_mask].requires_grad_(True)))
+
+                # Set new param's state
+                optimizer.state[group["params"][0]] = stored_state
+            else:
+                group["params"][0] = nn.Parameter(group["params"][0][keep_mask].requires_grad_(True))
+            
+            optimizable_tensors[group["name"]] = group["params"][0]
+
+        return optimizable_tensors
+
+    def prune(self, optimizer: torch.optim.Optimizer, mask):
+        keep_mask = ~mask
+        optimizable_tensors = self._prune_optimizer(optimizer, keep_mask)
+
+        self._pos = optimizable_tensors["pos"]
+        self._concentration = optimizable_tensors["concentration"]
+        self._scale = optimizable_tensors["scale"]
+        self._rotation = optimizable_tensors["rotation"]
+
+    def densify_and_prune(self, optimizer: torch.optim.Optimizer):
+        prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
+        self.prune(optimizer, prune_mask)
+
+        self.num_gaussians = self._pos.shape[0]

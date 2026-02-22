@@ -1,12 +1,15 @@
 import torch
 import torch.optim as optim
 from tqdm import tqdm
+
+from config import TrainParams, DensificationParams
 from gs_model import GasSplattingModel
 
 class Trainer:
-    def __init__(self, model: GasSplattingModel, train_cfg):
+    def __init__(self, model: GasSplattingModel, train_cfg: TrainParams, densify_cfg: DensificationParams):
         self.model = model
         self.train_cfg = train_cfg
+        self.densify_cfg = densify_cfg
 
         self.optimizer: optim.Optimizer = optim.Adam([
             {'params': [model._pos], 'lr': train_cfg.pos_lr, 'name': 'pos'},
@@ -20,6 +23,11 @@ class Trainer:
             step_size=train_cfg.lr_decay_step,
             gamma=train_cfg.lr_decay
         )
+
+    def is_densify_it(self, iteration):
+        return (iteration >= self.densify_cfg.densify_from
+            and iteration <= self.densify_cfg.densify_until 
+            and iteration % self.densify_cfg.densify_interval == 0)
 
     def train(self, p_rays, u_rays, y_true):
         """
@@ -60,12 +68,15 @@ class Trainer:
             if it % 100 == 0:
                 pbar.set_postfix({'loss': f'{loss.item():.5f}'})
             
+            if self.is_densify_it(it):
+                self.model.densify_and_prune(self.optimizer)
+            
             if current_loss < self.train_cfg.target_loss:
                 pbar.write(f"Training ended at iteration: {it}")
                 break
 
         pbar.close()
 
-        print(f"Final Loss: {loss.item():.6f}")
+        print(f"Final Loss: {loss.item():.6f}\nTotal gaussians: {self.model.num_gaussians}")
 
         return loss_history
