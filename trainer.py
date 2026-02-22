@@ -59,6 +59,7 @@ class Trainer:
             
             # Backward
             total_loss.backward()
+            self.model.update_accum_gradient()
             self.optimizer.step()
             self.scheduler.step()
             
@@ -69,7 +70,8 @@ class Trainer:
                 pbar.set_postfix({'loss': f'{loss.item():.5f}'})
             
             if self.is_densify_it(it):
-                self.model.densify_and_prune(self.optimizer)
+                with torch.no_grad():
+                    self.model.densify_and_prune(self.optimizer)
             
             if current_loss < self.train_cfg.target_loss:
                 pbar.write(f"Training ended at iteration: {it}")
@@ -77,6 +79,6 @@ class Trainer:
 
         pbar.close()
 
-        print(f"Final Loss: {loss.item():.6f}\nTotal gaussians: {self.model.num_gaussians}")
+        print(f"Final Loss: {loss.item():.6f}")
 
         return loss_history

@@ -93,9 +93,9 @@ plt.show()
 # ==========================================
 #       TRAINING LOOP (OPTIMIZATION)
 # ==========================================
-print("Starting Gas Splatting traning...")
-
 trainer = Trainer(model, train_cfg, densify_cfg)
+
+print("Starting Gas Splatting training...")
 loss_history = trainer.train(p_rays, u_rays, y_true)
 
 # ==========================================
@@ -103,7 +103,7 @@ loss_history = trainer.train(p_rays, u_rays, y_true)
 # ==========================================
 
 fig = plt.figure(figsize=(15, 5))
-fig.suptitle(f"Initial Gaussians = {init_cfg.initial_gaussians}\nBeams = {sim_cfg.num_beams}")
+fig.suptitle(f"Initial Gaussians = {init_cfg.initial_gaussians}\nFinal Gaussians = {model.num_gaussians}\nBeams = {sim_cfg.num_beams}")
 
 # 1. GT
 plt.subplot(2, 3, 1)

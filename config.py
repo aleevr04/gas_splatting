@@ -28,7 +28,8 @@ class TrainParams:
 
 @dataclass
 class DensificationParams:
-    gradient_threshold: float = 0.0005
+    gradient_threshold: float = 0.0004
+    scale_threshold: float = 1.5
     prune_threshold: float = 0.05
     densify_from: int = 200
     densify_until: int = 800

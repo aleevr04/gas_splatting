@@ -14,6 +14,9 @@ class GasSplattingModel(nn.Module):
         self.num_gaussians = num_gaussians
         self.map_size = map_size
         self.densify_cfg = densify_cfg
+
+        self.pos_grad_accum = torch.zeros((num_gaussians, 1))
+        self.denom = torch.zeros((num_gaussians, 1))
         
         # --- Model parameters ---
         self._pos = nn.Parameter(torch.rand(num_gaussians, 2) * map_size)
@@ -132,6 +135,44 @@ class GasSplattingModel(nn.Module):
             optimizable_tensors[group["name"]] = group["params"][0]
 
         return optimizable_tensors
+    
+    def _cat_tensors_to_optimizer(self, optimizer: torch.optim.Optimizer, tensors_dict):
+        optimizable_tensors = {}
+
+        for group in optimizer.param_groups:
+            extension_tensor = tensors_dict[group["name"]]
+            stored_state = optimizer.state.get(group["params"][0], None)
+            if stored_state is not None:
+                # Update optimizer's internal state
+                stored_state["exp_avg"] = torch.cat(
+                    (stored_state["exp_avg"], torch.zeros_like(extension_tensor)), dim=0
+                )
+                stored_state["exp_avg_sq"] = torch.cat(
+                    (stored_state["exp_avg_sq"], torch.zeros_like(extension_tensor)), dim=0
+                )
+
+                # Remove old state
+                del optimizer.state[group["params"][0]]
+
+                # New param
+                group["params"][0] = nn.Parameter(
+                    torch.cat(
+                        (group["params"][0], extension_tensor), dim=0
+                    ).requires_grad_(True)
+                )
+
+                # Set param's new state
+                optimizer.state[group["params"][0]] = stored_state
+            else:
+                group["params"][0] = nn.Parameter(
+                    torch.cat(
+                        (group["params"][0], extension_tensor), dim=0
+                    ).requires_grad_(True)
+                )
+            
+            optimizable_tensors[group["name"]] = group["params"][0]
+
+        return optimizable_tensors      
 
     def prune(self, optimizer: torch.optim.Optimizer, mask):
         keep_mask = ~mask
@@ -142,8 +183,57 @@ class GasSplattingModel(nn.Module):
         self._scale = optimizable_tensors["scale"]
         self._rotation = optimizable_tensors["rotation"]
 
-    def densify_and_prune(self, optimizer: torch.optim.Optimizer):
-        prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
-        self.prune(optimizer, prune_mask)
+    def clone(self, optimizer: torch.optim.Optimizer, mask):
+        new_pos = self._pos[mask]
+        new_concentration = inverse_softplus(self.get_concentration()[mask] * 0.5)
+        new_scale = self._scale[mask]
+        new_rotation = self._rotation[mask]
 
+        # Original gaussians now have half the concentration
+        self._concentration[mask] = new_concentration
+
+        tensors_dict = {
+            "pos": new_pos,
+            "concentration": new_concentration,
+            "scale": new_scale,
+            "rotation": new_rotation
+        }
+
+        # Add new gaussians' parameters
+        optimizable_tensors = self._cat_tensors_to_optimizer(optimizer, tensors_dict)
+
+        self._pos = optimizable_tensors["pos"]
+        self._concentration = optimizable_tensors["concentration"]
+        self._scale = optimizable_tensors["scale"]
+        self._rotation = optimizable_tensors["rotation"]
+
+    def densify_and_prune(self, optimizer: torch.optim.Optimizer):
+        # Prune
+        if self.num_gaussians > 1:
+            prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
+            self.prune(optimizer, prune_mask)
+
+        grads = (self.pos_grad_accum / self.denom).squeeze() # Average pos gradient
+        grads[grads.isnan()] = 0.0
+        grad_mask = grads > self.densify_cfg.gradient_threshold
+
+        # Clone
+        clone_mask = torch.logical_and(
+            grad_mask,
+            torch.max(self.get_scale(), dim=1).values < self.densify_cfg.scale_threshold
+        )
+        self.clone(optimizer, clone_mask)
+
+        # Update current gaussians count
         self.num_gaussians = self._pos.shape[0]
+
+        # Reset gradient accumulator
+        self.pos_grad_accum = torch.zeros((self.num_gaussians, 1))
+        self.denom = torch.zeros((self.num_gaussians, 1))
+
+    def update_accum_gradient(self):
+        grad_norm = torch.linalg.vector_norm(self._pos.grad, dim=-1, keepdim=True)
+        mask = grad_norm > 1e-6
+
+        self.pos_grad_accum[mask] += grad_norm[mask]
+        self.denom[mask] += 1
