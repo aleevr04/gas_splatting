@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from config import InitParams, SimulationParams, TrainParams, parse_args_into_dataclasses
 from gs_model import GasSplattingModel
+from trainer import Trainer
 from utils.init_utils import lsqr_initialization
 from utils.plot_utils import render_gaussian_map
 from utils.tomo_utils import (
@@ -90,48 +91,8 @@ plt.show()
 # ==========================================
 print("Starting Gas Splatting traning...")
 
-optimizer = optim.Adam([
-    {'params': [model._pos], 'lr': train_cfg.pos_lr, 'name': 'pos'},
-    {'params': [model._scale], 'lr': train_cfg.scale_lr, 'name': 'scale'},
-    {'params': [model._rotation], 'lr': train_cfg.rotation_lr, 'name': 'rotation'},
-    {'params': [model._concentration], 'lr': train_cfg.concentration_lr, 'name': 'concentration'},
-])
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=train_cfg.lr_decay_step, gamma=train_cfg.lr_decay)
-
-loss_history = []
-
-# Progress bar
-pbar = tqdm(range(train_cfg.iterations), desc="Training")
-for it in pbar:
-    optimizer.zero_grad()
-    
-    # Forward Pass (Compute gaussians integrals)
-    y_pred = model(p_rays, u_rays)
-    
-    # Loss
-    loss = torch.mean((y_pred - y_true)**2)
-    
-    # L1 Regularization (sparsity)
-    total_loss = loss + train_cfg.l1_reg * torch.mean(model.get_concentration())
-    
-    # Backward
-    total_loss.backward()
-    optimizer.step()
-    scheduler.step()
-    
-    current_loss = loss.item()
-    loss_history.append(current_loss)
-
-    if it % 100 == 0:
-        pbar.set_postfix({'loss': f'{loss.item():.5f}'})
-    
-    if current_loss < train_cfg.target_loss:
-        pbar.write(f"Training ended at iteration: {it}")
-        break
-
-pbar.close()
-
-print(f"Final Loss: {loss.item():.6f}")
+trainer = Trainer(model, train_cfg)
+loss_history = trainer.train(p_rays, u_rays, y_true)
 
 # ==========================================
 #              VISUALIZATION
