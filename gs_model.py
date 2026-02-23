@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 
 from config import DensificationParams
 from utils.gaussian_utils import (
@@ -111,8 +112,9 @@ class GasSplattingModel(nn.Module):
 
     # -------- DENSIFICATION ----------
 
-    def _prune_optimizer(self, optimizer: torch.optim.Optimizer, keep_mask):
+    def _prune_optimizer(self, optimizer: torch.optim.Optimizer, mask):
         optimizable_tensors = {}
+        keep_mask = ~mask
 
         for group in optimizer.param_groups:
             stored_state = optimizer.state.get(group["params"][0], None)
@@ -175,8 +177,7 @@ class GasSplattingModel(nn.Module):
         return optimizable_tensors      
 
     def prune(self, optimizer: torch.optim.Optimizer, mask):
-        keep_mask = ~mask
-        optimizable_tensors = self._prune_optimizer(optimizer, keep_mask)
+        optimizable_tensors = self._prune_optimizer(optimizer, mask)
 
         self._pos = optimizable_tensors["pos"]
         self._concentration = optimizable_tensors["concentration"]
@@ -207,29 +208,84 @@ class GasSplattingModel(nn.Module):
         self._scale = optimizable_tensors["scale"]
         self._rotation = optimizable_tensors["rotation"]
 
-    def densify_and_prune(self, optimizer: torch.optim.Optimizer):
-        # Prune
-        if self.num_gaussians > 1:
-            prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
-            self.prune(optimizer, prune_mask)
+    def split(self, optimizer: torch.optim.Optimizer, mask, N=2):
+        # Generate new positions based on original gaussian functions
+        stds = self.get_scale()[mask].repeat(N, 1)
+        means = torch.zeros((stds.size(0), 2))
+        samples = torch.normal(mean=means, std=stds * 0.5)
+        
+        # Transform to global coordinate system
+        rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
+        new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
 
+        # Avoid invalid positions and transform to paramter's space
+        new_pos = torch.clamp(new_pos, min=1e-5, max=self.map_size - 1e-5)
+        new_pos = inverse_sigmoid(new_pos, self.map_size)
+
+        # Divide original concentration by N
+        new_concentration = inverse_softplus(
+            self.get_concentration()[mask].repeat(N) * (1 / N)
+        )
+
+        # Divide original scale by a factor of N
+        new_scale = self._scale[mask].repeat(N, 1) - math.log(N)
+
+        new_rotation = self._rotation[mask].repeat(N)
+
+        tensors_dict = {
+            "pos": new_pos,
+            "concentration": new_concentration,
+            "scale": new_scale,
+            "rotation": new_rotation
+        }
+
+        # Add new gaussians' parameters
+        self._cat_tensors_to_optimizer(optimizer, tensors_dict)
+
+        # Prune original gaussians
+        prune_mask = torch.cat(
+            (
+                mask, 
+                torch.zeros(N * mask.sum(), dtype=torch.bool)
+            )
+        )
+        self.prune(optimizer, prune_mask)
+
+    def densify_and_prune(self, optimizer: torch.optim.Optimizer):
+        # Gaussians with high gradient
         grads = (self.pos_grad_accum / self.denom).squeeze() # Average pos gradient
         grads[grads.isnan()] = 0.0
         grad_mask = grads > self.densify_cfg.gradient_threshold
 
-        # Clone
-        clone_mask = torch.logical_and(
-            grad_mask,
-            torch.max(self.get_scale(), dim=1).values < self.densify_cfg.scale_threshold
-        )
+        # Gaussians with small scale
+        small_scale_mask = torch.max(self.get_scale(), dim=1).values < self.densify_cfg.scale_threshold
+
+        # --- Clone ---
+        clone_mask = torch.logical_and(grad_mask, small_scale_mask)
         self.clone(optimizer, clone_mask)
+
+        # --- Split ---
+        split_mask = torch.logical_and(grad_mask, ~small_scale_mask)
+
+        # Number of gaussians may have changed
+        num_cloned = int(clone_mask.sum().item())
+        if num_cloned > 0:
+            padding = torch.zeros(num_cloned, dtype=torch.bool)
+            split_mask = torch.cat([split_mask, padding])
+
+        self.split(optimizer, split_mask)
+
+        # --- Prune ---
+        if self.num_gaussians > 1:
+            prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
+            self.prune(optimizer, prune_mask)
 
         # Update current gaussians count
         self.num_gaussians = self._pos.shape[0]
 
         # Reset gradient accumulator
-        self.pos_grad_accum = torch.zeros((self.num_gaussians, 1))
-        self.denom = torch.zeros((self.num_gaussians, 1))
+        self.pos_grad_accum = torch.zeros((self.num_gaussians, 1), device=self._pos.device)
+        self.denom = torch.zeros((self.num_gaussians, 1), device=self._pos.device)
 
     def update_accum_gradient(self):
         grad_norm = torch.linalg.vector_norm(self._pos.grad, dim=-1, keepdim=True)
