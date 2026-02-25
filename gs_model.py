@@ -212,13 +212,13 @@ class GasSplattingModel(nn.Module):
         # Generate new positions based on original gaussian functions
         stds = self.get_scale()[mask].repeat(N, 1)
         means = torch.zeros((stds.size(0), 2))
-        samples = torch.normal(mean=means, std=stds * 0.5)
+        samples = torch.normal(mean=means, std=stds)
         
         # Transform to global coordinate system
         rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
         new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
 
-        # Avoid invalid positions and transform to paramter's space
+        # Avoid invalid positions and transform to parameter's space
         new_pos = torch.clamp(new_pos, min=1e-5, max=self.map_size - 1e-5)
         new_pos = inverse_sigmoid(new_pos, self.map_size)
 
@@ -227,8 +227,8 @@ class GasSplattingModel(nn.Module):
             self.get_concentration()[mask].repeat(N) * (1 / N)
         )
 
-        # Divide original scale by a factor of N
-        new_scale = self._scale[mask].repeat(N, 1) - math.log(N)
+        # Divide original scale by a factor of 0.8 * N
+        new_scale = self._scale[mask].repeat(N, 1) - math.log(0.8 * N)
 
         new_rotation = self._rotation[mask].repeat(N)
 

@@ -25,12 +25,13 @@ class TrainParams:
     iterations: int = 1500
     target_loss: float = 1e-5
     l1_reg: float = 0.1
+    no_live_vis: bool = False
 
 @dataclass
 class DensificationParams:
     gradient_threshold: float = 0.0004
     scale_threshold: float = 2.5
-    prune_threshold: float = 0.05
+    prune_threshold: float = 0.01
     densify_from: int = 200
     densify_until: int = 800
     densify_interval: int = 200
