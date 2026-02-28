@@ -8,12 +8,7 @@ from gs_model import GasSplattingModel
 from trainer import Trainer
 from utils.init_utils import lsqr_initialization
 from utils.plot_utils import render_gaussian_map
-from utils.tomo_utils import (
-    generate_random_beams,
-    generate_radial_beams,
-    generate_gas_distribution,
-    simulate_gas_integrals
-)
+from utils.sim_utils import generate_simulation_data
 
 # ==========================================
 #              CONFIGURATION
@@ -29,33 +24,8 @@ print(f"Using device: {DEVICE}")
 # ==========================================
 #              SIMULATION
 # ==========================================
-# ------ Generate Simulation Beams ------
-print("Generating simulated beams...")
 
-raw_beams = generate_random_beams((cfg.sim.map_size, cfg.sim.map_size), cfg.sim.num_beams // 2)
-raw_beams += generate_radial_beams((cfg.sim.map_size, cfg.sim.map_size), cfg.sim.num_beams // 2)
-
-p_list = []
-u_list = []
-for (start, end) in raw_beams:
-    p = np.array(start)
-    u = np.array(end) - np.array(start) 
-    p_list.append(p)
-    u_list.append(u)
-
-p_rays = torch.tensor(np.array(p_list), dtype=torch.float32).to(DEVICE)
-u_rays = torch.tensor(np.array(u_list), dtype=torch.float32).to(DEVICE)
-
-# ------------ Generate GT -------------
-print("Generating Ground Truth...")
-
-img_gt = generate_gas_distribution((cfg.sim.grid_res, cfg.sim.grid_res), num_blobs=cfg.sim.num_blobs, gauss_filter=not cfg.sim.no_gauss_filter)
-
-# Simulate integral measurements
-cell_size = cfg.sim.map_size / cfg.sim.grid_res
-measurements_list = simulate_gas_integrals(img_gt, raw_beams, cell_size)
-
-y_true = torch.tensor(measurements_list, dtype=torch.float32, device=DEVICE)
+sim_data = generate_simulation_data(cfg, DEVICE)
 
 # ====================================================
 #                INITIALIZE GAUSSIANS
@@ -63,8 +33,8 @@ y_true = torch.tensor(measurements_list, dtype=torch.float32, device=DEVICE)
 print(f"Running Least Squares initialization (Grid {cfg.init.coarse_res}x{cfg.init.coarse_res})")
 
 init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
-    raw_beams, 
-    y_true, 
+    sim_data.beams, 
+    sim_data.y_true, 
     cfg.sim.map_size, 
     num_gaussians=cfg.init.initial_gaussians,
     coarse_res=cfg.init.coarse_res
@@ -93,7 +63,7 @@ plt.show()
 trainer = Trainer(model, cfg)
 
 print("Starting Gas Splatting training...")
-loss_history = trainer.train(p_rays, u_rays, y_true)
+loss_history = trainer.train(sim_data.p_rays, sim_data.u_rays, sim_data.y_true)
 print(f"Loss: {loss_history[-1]:.6f}")
 
 # ==========================================
@@ -105,11 +75,11 @@ fig.suptitle(f"Initial Gaussians = {initial_gaussians}\nFinal Gaussians = {model
 # 1. GT
 plt.subplot(2, 3, 1)
 plt.title(f"Ground Truth (Grid {cfg.sim.grid_res}x{cfg.sim.grid_res})")
-plt.imshow(img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
+plt.imshow(sim_data.img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
 
 # Beams
-for i in range(0, len(raw_beams)):
-    (x0, y0), (x1, y1) = raw_beams[i]
+for i in range(0, len(sim_data.beams)):
+    (x0, y0), (x1, y1) = sim_data.beams[i]
     plt.plot([x0, x1], [y0, y1], 'w-', alpha=0.2, linewidth=0.5)
 plt.colorbar(label="ppm")
 

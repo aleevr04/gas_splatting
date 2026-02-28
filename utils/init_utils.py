@@ -3,7 +3,7 @@ import torch
 from scipy.sparse.linalg import lsqr
 from skimage.feature import peak_local_max
 
-from utils.tomo_utils import create_system_matrix_sparse, cell2xy
+from utils.sim_utils import create_system_matrix_sparse, cell2xy
 
 def lsqr_initialization(beams, measurements, map_size, num_gaussians=None, coarse_res=20):
     """
