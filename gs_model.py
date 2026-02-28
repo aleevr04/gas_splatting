@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 
-from config import DensificationParams
+from config import Config
 from utils.gaussian_utils import (
     compute_predicted_projections,
     inverse_sigmoid,
@@ -10,20 +10,20 @@ from utils.gaussian_utils import (
 )
 
 class GasSplattingModel(nn.Module):
-    def __init__(self, num_gaussians, map_size, densify_cfg: DensificationParams):
+    def __init__(self, initial_gaussians, cfg: Config):
         super().__init__()
-        self.num_gaussians = num_gaussians
-        self.map_size = map_size
-        self.densify_cfg = densify_cfg
+        self.num_gaussians = initial_gaussians
+        self.map_size = cfg.sim.map_size
+        self.densify_cfg = cfg.densify
 
-        self.pos_grad_accum = torch.zeros((num_gaussians, 1))
-        self.denom = torch.zeros((num_gaussians, 1))
+        self.pos_grad_accum = torch.zeros((initial_gaussians, 1))
+        self.denom = torch.zeros((initial_gaussians, 1))
         
         # --- Model parameters ---
-        self._pos = nn.Parameter(torch.rand(num_gaussians, 2) * map_size)
-        self._concentration = nn.Parameter(torch.rand(num_gaussians))
-        self._scale = nn.Parameter(torch.zeros(num_gaussians, 2))
-        self._rotation = nn.Parameter(torch.rand(num_gaussians) * 2*torch.pi)
+        self._pos = nn.Parameter(torch.rand(initial_gaussians, 2) * self.map_size)
+        self._concentration = nn.Parameter(torch.rand(initial_gaussians))
+        self._scale = nn.Parameter(torch.zeros(initial_gaussians, 2))
+        self._rotation = nn.Parameter(torch.rand(initial_gaussians) * 2*torch.pi)
 
     def initialize_gaussians(self, pos, concentration, std):
         """

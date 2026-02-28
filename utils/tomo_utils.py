@@ -58,31 +58,27 @@ def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5, gauss_filter
     rows, cols = grid_size
     gas_map = np.zeros(grid_size)
 
-    # 1. Colocar "semillas" de concentración aleatoria muy densas
-    #    (Puntos de ruido blanco)
+    # Random concentration points
     for _ in range(num_blobs):
         r = np.random.randint(rows // 5, 4 * rows // 5)
         c = np.random.randint(cols // 5, 4 * cols // 5)
         gas_map[r, c] = np.random.uniform(5.0, 10.0)
 
-    # 2. Aplicar un filtro gaussiano MUY fuerte para expandir estas semillas
-    #    y fusionarlas en formas amorfas.
-    #    sigma variable crea asimetría en las formas.
+    # Apply gaussian filter
     if gauss_filter:
         sigma_r = rows / np.random.uniform(6, 12)
         sigma_c = cols / np.random.uniform(6, 12)
         gas_map = gaussian_filter(gas_map, sigma=(sigma_r, sigma_c))
 
-    # 3. Añadir ruido de alta frecuencia para textura (imperfecciones)
+    # Add random noise
     noise = np.random.rand(rows, cols)
     gas_map += noise * (gas_map.max() * 0.1)
 
-    # 4. Normalizar y limpiar el fondo (Thresholding)
-    #    Hacemos que las concentraciones bajas sean exactamente 0 para tener bordes definidos.
+    # Remove cells with low concentration
     threshold = gas_map.max() * 0.3
     gas_map[gas_map < threshold] = 0
 
-    # 5. Re-normalizar al rango deseado (ej. max 1.0 ppm)
+    # Normalize
     if gas_map.max() > 0:
         gas_map = gas_map / gas_map.max()
 

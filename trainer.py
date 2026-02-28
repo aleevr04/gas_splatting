@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from config import TrainParams, DensificationParams
+from config import Config
 from gs_model import GasSplattingModel
 
 
@@ -72,24 +72,24 @@ class LiveVisualizer:
 
 
 class Trainer:
-    def __init__(self, model: GasSplattingModel, train_cfg: TrainParams, densify_cfg: DensificationParams):
+    def __init__(self, model: GasSplattingModel, cfg: Config):
         self.model = model
-        self.train_cfg = train_cfg
-        self.densify_cfg = densify_cfg
+        self.train_cfg = cfg.train
+        self.densify_cfg = cfg.densify
         
         self.visualizer = None if self.train_cfg.no_live_vis else LiveVisualizer(model.map_size)
 
         self.optimizer: optim.Optimizer = optim.Adam([
-            {'params': [model._pos], 'lr': train_cfg.pos_lr, 'name': 'pos'},
-            {'params': [model._scale], 'lr': train_cfg.scale_lr, 'name': 'scale'},
-            {'params': [model._rotation], 'lr': train_cfg.rotation_lr, 'name': 'rotation'},
-            {'params': [model._concentration], 'lr': train_cfg.concentration_lr, 'name': 'concentration'},
+            {'params': [model._pos], 'lr': self.train_cfg.pos_lr, 'name': 'pos'},
+            {'params': [model._scale], 'lr': self.train_cfg.scale_lr, 'name': 'scale'},
+            {'params': [model._rotation], 'lr': self.train_cfg.rotation_lr, 'name': 'rotation'},
+            {'params': [model._concentration], 'lr': self.train_cfg.concentration_lr, 'name': 'concentration'},
         ])
         
         self.scheduler = optim.lr_scheduler.StepLR(
             self.optimizer,
-            step_size=train_cfg.lr_decay_step,
-            gamma=train_cfg.lr_decay
+            step_size=self.train_cfg.lr_decay_step,
+            gamma=self.train_cfg.lr_decay
         )
 
     def is_densify_it(self, iteration):
@@ -157,7 +157,5 @@ class Trainer:
         # Deactivate interactive mode
         if self.visualizer:
             plt.ioff()
-        
-        print(f"Final Loss: {loss.item():.6f}")
 
         return loss_history
