@@ -1,3 +1,5 @@
+import torch
+
 from typing import Optional
 from dataclasses import dataclass
 from simple_parsing import field
@@ -43,3 +45,13 @@ class Config:
     sim: SimulationParams
     train: TrainParams
     densify: DensificationParams
+
+    # "cuda" if available, "cpu" otherwise. Can be overwritten
+    device_type: str = "cuda" if torch.cuda.is_available() else "cpu"
+
+    @property
+    def device(self) -> torch.device:
+        if self.device_type == "cuda" and not torch.cuda.is_available():
+            print("Warning: CUDA requested but not available. Using CPU.")
+            return torch.device("cpu")
+        return torch.device(self.device_type)

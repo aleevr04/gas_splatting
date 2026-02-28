@@ -52,9 +52,9 @@ def plot_initial_guess(img_coarse, init_pos, map_size):
     plt.legend()
     plt.show()
 
-def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, cfg: Config, device: torch.device):
+def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, cfg: Config):
     """Shows GT, Gas Splatting reconstruction and loss history"""
-    
+
     fig = plt.figure(figsize=(15, 5))
     fig.suptitle(f"Initial Gaussians = {gaussians.initial_gaussians}\nFinal Gaussians = {gaussians.num_gaussians}\nBeams = {cfg.sim.num_beams}")
 
@@ -69,7 +69,7 @@ def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, l
     plt.colorbar(label="ppm")
 
     # 2. Reconstruction
-    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, device, grid_res=100)
+    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, grid_res=100)
     pos = gaussians.get_pos().detach().cpu().numpy()
 
     plt.subplot(2, 3, 2)
@@ -78,7 +78,7 @@ def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, l
     plt.colorbar(label="ppm")
     plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5)
 
-    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, device, cfg.sim.grid_res)
+    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cfg.sim.grid_res)
 
     plt.subplot(2, 3, 3)
     plt.title(f"GS Reconstruction (Grid)")

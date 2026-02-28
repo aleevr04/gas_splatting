@@ -275,7 +275,7 @@ def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_m
 #         GENERATE GROUND TRUTH
 # ==========================================
 
-def generate_simulation_data(cfg: Config, device: torch.device) -> SimulationData:
+def generate_simulation_data(cfg: Config) -> SimulationData:
     """Generates simulated beams and gas distribution (ground truth)"""
     print("Generating simulated beams...")
     
@@ -295,8 +295,8 @@ def generate_simulation_data(cfg: Config, device: torch.device) -> SimulationDat
         p_list.append(p)
         u_list.append(u)
 
-    p_rays = torch.tensor(np.array(p_list), dtype=torch.float32, device=device)
-    u_rays = torch.tensor(np.array(u_list), dtype=torch.float32, device=device)
+    p_rays = torch.tensor(np.array(p_list), dtype=torch.float32, device=cfg.device)
+    u_rays = torch.tensor(np.array(u_list), dtype=torch.float32, device=cfg.device)
 
     print("Generating Ground Truth...")
     
@@ -309,7 +309,7 @@ def generate_simulation_data(cfg: Config, device: torch.device) -> SimulationDat
 
     cell_size = cfg.sim.map_size / cfg.sim.grid_res
     measurements_list = simulate_gas_integrals(img_gt, beams, cell_size)
-    y_true = torch.tensor(measurements_list, dtype=torch.float32, device=device)
+    y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
 
     return SimulationData(
         beams=beams,

@@ -18,11 +18,10 @@ def main():
     args = parser.parse_args()
     cfg: Config = args.cfg
 
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {DEVICE}")
+    print(f"Using device: {cfg.device}")
 
     # ------- Simulation ------
-    sim_data = generate_simulation_data(cfg, DEVICE)
+    sim_data = generate_simulation_data(cfg)
 
     # -------- Initialize gaussians --------
     print(f"Running Least Squares initialization (Grid {cfg.init.coarse_res}x{cfg.init.coarse_res})")
@@ -35,10 +34,10 @@ def main():
     )
     initial_gaussians = init_pos.shape[0]
 
-    model = GasSplattingModel(initial_gaussians, cfg).to(DEVICE)
+    model = GasSplattingModel(initial_gaussians, cfg).to(cfg.device)
     model.initialize_gaussians(
-        init_pos.to(DEVICE), 
-        init_concentration.to(DEVICE), 
+        init_pos.to(cfg.device), 
+        init_concentration.to(cfg.device), 
         init_std
     )
     print("Model initialized")
@@ -53,7 +52,7 @@ def main():
     print(f"Loss: {loss_history[-1]:.6f}")
 
     # --------- Plot Results --------
-    plot_final_results(model, sim_data, loss_history, cfg, DEVICE)
+    plot_final_results(model, sim_data, loss_history, cfg)
 
 if __name__ == "__main__":
     main()
