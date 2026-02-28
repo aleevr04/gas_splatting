@@ -12,6 +12,7 @@ from utils.gaussian_utils import (
 class GasSplattingModel(nn.Module):
     def __init__(self, initial_gaussians, cfg: Config):
         super().__init__()
+        self.initial_gaussians = initial_gaussians
         self.num_gaussians = initial_gaussians
         self.map_size = cfg.sim.map_size
         self.densify_cfg = cfg.densify

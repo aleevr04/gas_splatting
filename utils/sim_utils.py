@@ -13,7 +13,6 @@ from config import Config
 
 @dataclass
 class SimulationData:
-    """Contenedor de datos con los resultados de la simulación de gases y rayos."""
     beams: List[Tuple[Tuple[float, float], Tuple[float, float]]]
     p_rays: torch.Tensor
     u_rays: torch.Tensor
@@ -277,7 +276,7 @@ def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_m
 # ==========================================
 
 def generate_simulation_data(cfg: Config, device: torch.device) -> SimulationData:
-    """Genera la simulación completa de gases y rayos, devolviendo un DTO."""
+    """Generates simulated beams and gas distribution (ground truth)"""
     print("Generating simulated beams...")
     
     map_shape = (cfg.sim.map_size, cfg.sim.map_size)
