@@ -1,6 +1,3 @@
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
 from simple_parsing import ArgumentParser
 
 from config import Config
@@ -42,7 +39,7 @@ def main():
     )
     print("Model initialized")
 
-    plot_initial_guess(img_coarse, init_pos, cfg.sim.map_size)
+    plot_initial_guess(sim_data.img_gt, img_coarse, init_pos, cfg)
 
     # -------- Training ----------
     trainer = Trainer(model, cfg)

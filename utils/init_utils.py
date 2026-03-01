@@ -28,9 +28,9 @@ def lsqr_initialization(beams, measurements, map_size, num_gaussians=None, coars
     img_coarse = x_coarse.reshape((coarse_res, coarse_res))
 
     if num_gaussians:
-        coordinates_int = peak_local_max(img_coarse, min_distance=1, num_peaks=num_gaussians)
+        coordinates_int = peak_local_max(img_coarse, min_distance=1, threshold_rel=0.6, num_peaks=num_gaussians)
     else:
-        coordinates_int = peak_local_max(img_coarse, min_distance=1)
+        coordinates_int = peak_local_max(img_coarse, min_distance=1, threshold_rel=0.6)
     
     pos = []
     concentration = []

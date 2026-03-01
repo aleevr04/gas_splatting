@@ -42,12 +42,19 @@ def render_gaussian_map(gaussians: GasSplattingModel, map_size: float, device: t
     # Retornar como numpy array (para tomo_utils)
     return final_img.detach().cpu().numpy()
 
-def plot_initial_guess(img_coarse, init_pos, map_size):
-    """Shows initial reconstruction image"""
+def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
+    """Shows ground truth and initial reconstruction image"""
 
     plt.figure()
-    plt.title("Algebraic Initialization (Least Squares)")
-    plt.imshow(img_coarse, origin='lower', extent=(0, map_size, 0, map_size))
+
+    plt.subplot(1, 2, 1)
+    plt.title(f"Ground Truth ({cfg.sim.grid_res}x{cfg.sim.grid_res})")
+    plt.imshow(img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
+    plt.colorbar(label="ppm")
+
+    plt.subplot(1, 2, 2)
+    plt.title(f"Algebraic Initialization ({cfg.init.coarse_res}x{cfg.init.coarse_res})")
+    plt.imshow(img_coarse, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size))
     plt.scatter(init_pos[:,0], init_pos[:,1], c='r', marker='x', label='Peaks')
     plt.legend()
     plt.show()
@@ -90,7 +97,7 @@ def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, l
     plt.title("Loss History")
     plt.plot(loss_history)
     plt.xlabel("Iteration")
-    plt.ylabel("MSE Loss")
+    plt.ylabel("Total Loss")
     plt.yscale('log')
     plt.grid(True, which="both", ls="-", alpha=0.3)
 
