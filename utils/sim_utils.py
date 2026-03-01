@@ -304,7 +304,8 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     img_gt = generate_gas_distribution(
         grid_size=grid_shape, 
         num_blobs=cfg.sim.num_blobs, 
-        gauss_filter=not cfg.sim.no_gauss_filter
+        gauss_filter=not cfg.sim.no_gauss_filter,
+        seed=cfg.seed
     )
 
     cell_size = cfg.sim.map_size / cfg.sim.grid_res

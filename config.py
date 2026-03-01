@@ -32,7 +32,7 @@ class TrainParams:
 
 @dataclass
 class DensificationParams:
-    gradient_threshold: float = 0.0005
+    gradient_threshold: float = 0.05
     scale_threshold: float = 2.5
     prune_threshold: float = 0.005
     densify_from: int = 200
@@ -45,6 +45,9 @@ class Config:
     sim: SimulationParams
     train: TrainParams
     densify: DensificationParams
+
+    # Random seed for GT generation
+    seed: Optional[int] = None
 
     # "cuda" if available, "cpu" otherwise. Can be overwritten
     device_type: str = "cuda" if torch.cuda.is_available() else "cpu"
