@@ -276,10 +276,27 @@ def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_m
 # ==========================================
 
 def generate_simulation_data(cfg: Config) -> SimulationData:
-    """Generates simulated beams and gas distribution (ground truth)"""
-    print("Generating simulated beams...")
+    """Generates gas distribution (ground truth), beams and measurements"""
     
+    if cfg.seed:
+        np.random.seed(cfg.seed)
+
     map_shape = (cfg.sim.map_size, cfg.sim.map_size)
+    grid_shape = (cfg.sim.grid_res, cfg.sim.grid_res)
+    cell_size = cfg.sim.map_size / cfg.sim.grid_res
+
+    # ----- Ground Truth -----
+    print("Generating Ground Truth...")
+    
+    img_gt = generate_gas_distribution(
+        grid_size=grid_shape, 
+        num_blobs=cfg.sim.num_blobs, 
+        gauss_filter=not cfg.sim.no_gauss_filter,
+        #seed=cfg.seed
+    )
+
+    # ------ Beams ------
+    print("Generating beams...")
     
     num_random_beams = cfg.sim.num_beams // 2
     num_radial_beams = cfg.sim.num_beams - num_random_beams 
@@ -298,17 +315,8 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     p_rays = torch.tensor(np.array(p_list), dtype=torch.float32, device=cfg.device)
     u_rays = torch.tensor(np.array(u_list), dtype=torch.float32, device=cfg.device)
 
-    print("Generating Ground Truth...")
-    
-    grid_shape = (cfg.sim.grid_res, cfg.sim.grid_res)
-    img_gt = generate_gas_distribution(
-        grid_size=grid_shape, 
-        num_blobs=cfg.sim.num_blobs, 
-        gauss_filter=not cfg.sim.no_gauss_filter,
-        seed=cfg.seed
-    )
-
-    cell_size = cfg.sim.map_size / cfg.sim.grid_res
+    # ------- Measurements --------
+    print("Simulating gas integrals...")
     measurements_list = simulate_gas_integrals(img_gt, beams, cell_size)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
 
