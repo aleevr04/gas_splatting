@@ -19,20 +19,17 @@ class SimulationParams:
 
 @dataclass
 class TrainParams:
-    pos_lr: float = 0.01
-    scale_lr: float = 0.005
+    pos_lr: float = 0.008
+    scale_lr: float = 0.001
     rotation_lr: float = 0.001
-    concentration_lr: float = 0.01
-    lr_decay: float = 0.5
-    lr_decay_step: int = 200
+    concentration_lr: float = 0.005
     iterations: int = 3000
     target_loss: float = 1e-5
-    l1_reg: float = 0.1
     no_live_vis: bool = field(default=False, action="store_true")
 
 @dataclass
 class DensificationParams:
-    gradient_threshold: float = 0.05
+    gradient_threshold: float = 0.08
     scale_threshold: float = 2.5
     prune_threshold: float = 0.005
     densify_from: int = 200

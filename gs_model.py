@@ -19,6 +19,9 @@ class GasSplattingModel(nn.Module):
 
         self.pos_grad_accum = torch.zeros((initial_gaussians, 1))
         self.denom = torch.zeros((initial_gaussians, 1))
+
+        self.splits = 0
+        self.clones = 0
         
         # --- Model parameters ---
         self._pos = nn.Parameter(torch.rand(initial_gaussians, 2) * self.map_size)
@@ -264,6 +267,7 @@ class GasSplattingModel(nn.Module):
         # --- Clone ---
         clone_mask = torch.logical_and(grad_mask, small_scale_mask)
         self.clone(optimizer, clone_mask)
+        self.clones += clone_mask.sum()
 
         # --- Split ---
         split_mask = torch.logical_and(grad_mask, ~small_scale_mask)
@@ -275,6 +279,7 @@ class GasSplattingModel(nn.Module):
             split_mask = torch.cat([split_mask, padding])
 
         self.split(optimizer, split_mask)
+        self.splits += split_mask.sum()
 
         # --- Prune ---
         if self.num_gaussians > 1:

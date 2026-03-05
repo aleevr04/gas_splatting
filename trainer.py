@@ -1,5 +1,6 @@
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -20,7 +21,7 @@ class LiveVisualizer:
         # Loss History
         self.ax_loss.set_title("Loss History")
         self.ax_loss.set_xlabel("Iteration")
-        self.ax_loss.set_ylabel("MSE")
+        self.ax_loss.set_ylabel("Total Loss")
         self.ax_loss.set_yscale('log')
         self.loss_line, = self.ax_loss.plot([], [], 'b-', alpha=0.8)
 
@@ -71,6 +72,16 @@ class LiveVisualizer:
         self.fig.canvas.flush_events()
 
 
+def get_exp_lr_func(lr_init, lr_final, max_steps):
+    def lr_func(step):
+        if step < 0 or (lr_init == 0.0 and lr_final == 0.0):
+            return 0.0
+        
+        t = np.clip(step / max_steps, 0, 1)
+        return np.exp(np.log(lr_init) * (1 - t) + np.log(lr_final) * t)
+
+    return lr_func
+
 class Trainer:
     def __init__(self, model: GasSplattingModel, cfg: Config):
         self.model = model
@@ -85,11 +96,26 @@ class Trainer:
             {'params': [model._rotation], 'lr': self.train_cfg.rotation_lr, 'name': 'rotation'},
             {'params': [model._concentration], 'lr': self.train_cfg.concentration_lr, 'name': 'concentration'},
         ])
-        
-        self.scheduler = optim.lr_scheduler.StepLR(
-            self.optimizer,
-            step_size=self.train_cfg.lr_decay_step,
-            gamma=self.train_cfg.lr_decay
+
+        self.pos_lr_func = get_exp_lr_func(
+            lr_init=cfg.train.pos_lr,
+            lr_final=0.1*cfg.train.pos_lr,
+            max_steps=cfg.train.iterations
+        )
+        self.scale_lr_func = get_exp_lr_func(
+            lr_init=cfg.train.scale_lr,
+            lr_final=0.1*cfg.train.scale_lr,
+            max_steps=cfg.train.iterations
+        )
+        self.rotation_lr_func = get_exp_lr_func(
+            lr_init=cfg.train.rotation_lr,
+            lr_final=0.1*cfg.train.rotation_lr,
+            max_steps=cfg.train.iterations
+        )
+        self.concentration_lr_func = get_exp_lr_func(
+            lr_init=cfg.train.concentration_lr,
+            lr_final=0.1*cfg.train.concentration_lr,
+            max_steps=cfg.train.iterations
         )
 
     def is_densify_it(self, iteration):
@@ -100,6 +126,17 @@ class Trainer:
         )
 
         return (iteration >= dfrom and iteration <= duntil and (iteration - dfrom) % dinterval == 0)
+    
+    def update_learning_rates(self, iteration):
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == "pos":
+                param_group["lr"] = self.pos_lr_func(iteration)
+            elif param_group["name"] == "scale":
+                param_group["lr"] = self.scale_lr_func(iteration)
+            elif param_group["name"] == "rotation":
+                param_group["lr"] = self.rotation_lr_func(iteration)
+            elif param_group["name"] == "concentration":
+                param_group["lr"] = self.concentration_lr_func(iteration)
 
     def train(self, p_rays, u_rays, y_true):
         loss_history = []
@@ -109,16 +146,17 @@ class Trainer:
             self.optimizer.zero_grad()
             
             y_pred = self.model(p_rays, u_rays)
-            loss = torch.mean((y_pred - y_true)**2)
+
+            l1_loss = F.l1_loss(y_pred, y_true)
             
-            total_loss = loss + self.train_cfg.l1_reg * torch.mean(self.model.get_concentration())
+            total_loss = l1_loss
             
             total_loss.backward()
             self.model.update_accum_gradient()
+            self.update_learning_rates(it)
             self.optimizer.step()
-            self.scheduler.step()
             
-            current_loss = loss.item()
+            current_loss = total_loss.item()
             loss_history.append(current_loss)
 
             if it % 100 == 0:
@@ -153,6 +191,8 @@ class Trainer:
                 break
 
         pbar.close()
+
+        print(f"Splits: {self.model.splits}   Clones: {self.model.clones}")
         
         # Deactivate interactive mode
         if self.visualizer:
