@@ -38,7 +38,7 @@ def cell2xy(cell_rc: tuple, cell_size_m: float) -> tuple:
 
 
 # ==========================================
-#       GAS DISTRIBUTION FUNCTIONS
+#           GAS DISTRIBUTION
 # ==========================================
 
 def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5, gauss_filter: bool = True, seed = None) -> np.ndarray:
@@ -69,30 +69,6 @@ def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5, gauss_filter
         gas_map = gas_map / gas_map.max()
 
     return gas_map
-
-def gaussian_plume(x_coords, y_coords, source_x, source_y, sigma_x, sigma_y, amplitude=1.0):
-    """Generates a 2D Gaussian plume over a grid of (x, y) coordinates."""
-    X, Y = np.meshgrid(x_coords, y_coords)
-    exponent = -((X - source_x)**2 / (2 * sigma_x**2) + (Y - source_y)**2 / (2 * sigma_y**2))
-    plume = amplitude * np.exp(exponent)
-    return plume
-
-def generate_gaussian_plume_array(array_shape, cell_size_m, source_location_meters, plume_sigmas_meters, amplitude=1.0):
-    """Generates a 2D NumPy array representing a Gaussian plume based on array dimensions."""
-    rows, cols = array_shape
-    x_coords_meter = np.arange(0, cols * cell_size_m, cell_size_m) + cell_size_m / 2
-    y_coords_meter = np.arange(0, rows * cell_size_m, cell_size_m) + cell_size_m / 2
-
-    source_x_meter, source_y_meter = source_location_meters
-    sigma_x_meter, sigma_y_meter = plume_sigmas_meters
-
-    plume_data = gaussian_plume(x_coords_meter, y_coords_meter,
-                                 source_x_meter, source_y_meter,
-                                 sigma_x_meter / cell_size_m, sigma_y_meter / cell_size_m,
-                                 amplitude)
-
-    return plume_data
-
 
 # ==========================================
 #            BEAM FUNCTIONS
@@ -194,7 +170,7 @@ def generate_horizontal_vertical_beams(map_size_m: tuple, num_beams: int):
 
 
 # ==========================================
-#   BEAM GAS INTEGRAL / SYSTEM MATRIX
+#     BEAM GAS INTEGRAL / SYSTEM MATRIX
 # ==========================================
 
 def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_dimensions_meters: float) -> list[float]:
@@ -232,7 +208,7 @@ def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_
                 if not intersection.is_empty and intersection.geom_type == 'LineString':
                     path_length_in_cell = intersection.length
                     concentration = gas_concentration_map[r, c]
-                    weighted_concentration += (concentration * path_length_in_cell) * 2
+                    weighted_concentration += concentration * path_length_in_cell
                     
         integral_concentrations.append(weighted_concentration)
 
@@ -266,7 +242,7 @@ def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_m
                 if not intersection.is_empty and intersection.geom_type == 'LineString':
                     path_length_in_cell = intersection.length
                     cell_index = r * cols + c
-                    A[i, cell_index] = path_length_in_cell * 2
+                    A[i, cell_index] = path_length_in_cell
 
     return A
 
