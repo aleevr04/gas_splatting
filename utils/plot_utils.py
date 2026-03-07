@@ -10,7 +10,7 @@ def render_gaussian_map(gaussians: GasSplattingModel, map_size: float, device: t
     Turns gaussians into a 2D image (numpy matrix)
     """
 
-    # Crear grid de coordenadas
+    # Grid
     x = torch.linspace(0, map_size, grid_res, device=device)
     y = torch.linspace(0, map_size, grid_res, device=device)
     X, Y = torch.meshgrid(x, y, indexing='xy')
@@ -23,17 +23,16 @@ def render_gaussian_map(gaussians: GasSplattingModel, map_size: float, device: t
         cov_inv = gaussians.get_covariance_inverse()
         concentration = gaussians.get_concentration()
 
-        # Sumar contribución de cada gaussiana
+        # Sum each Gaussian contribution
         for k in range(gaussians.num_gaussians):
             mu = pos[k]
             sig_inv = cov_inv[k]
             c = concentration[k]
             
+            # Evaluate Gaussian at each cell
             d = grid_pos - mu
             d = d.unsqueeze(-1) 
             
-            # Distancia de Mahalanobis: d^T * Sigma^-1 * d
-            # Ajustamos dimensiones para matmul eficiente
             sig_inv_exp = sig_inv.view(1, 1, 2, 2)
             dist = torch.matmul(d.transpose(-1, -2), torch.matmul(sig_inv_exp, d)).squeeze()
             

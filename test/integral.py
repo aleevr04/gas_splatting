@@ -12,7 +12,7 @@ def test_multiple_gaussians_and_rays(num_gaussians, num_rays):
 
     L = torch.randn(num_gaussians, 2, 2)
     sigmas = torch.bmm(L, L.transpose(1, 2)) + torch.eye(2)*0.1
-    inv_sigmas = torch.inverse(sigmas) # Precomputamos la inversa
+    inv_sigmas = torch.inverse(sigmas)
     inv_sigmas.requires_grad = True
 
     p_rays = torch.randn(num_rays, 2)
