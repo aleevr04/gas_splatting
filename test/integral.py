@@ -26,8 +26,8 @@ def test_multiple_gaussians_and_rays(num_gaussians, num_rays):
     loss = torch.sum(proj_pred**2) # Loss dummy
     loss.backward()
 
-    print(f"Mean gradient shape: {means.grad.shape if means.grad else ""}")
-    print(f"Covariance inverse gradient shape: {inv_sigmas.grad.shape if inv_sigmas.grad else ""}")
+    print(f"Mean gradient shape: {means.grad.shape if means.grad is not None else ""}")
+    print(f"Covariance inverse gradient shape: {inv_sigmas.grad.shape if inv_sigmas.grad is not None else ""}")
 
 def test_integral_value():
     """
