@@ -45,21 +45,23 @@ def render_gaussian_map(gaussians: GasSplattingModel, map_size: float, device: t
 def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
     """Shows ground truth and initial reconstruction image"""
 
-    plt.figure()
+    plt.figure(figsize=(12, 5))
 
     plt.subplot(1, 2, 1)
     plt.title(f"Ground Truth ({cfg.sim.grid_res}x{cfg.sim.grid_res})")
-    plt.imshow(img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
-    plt.colorbar(label="ppm")
+    plt.imshow(img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
 
     plt.subplot(1, 2, 2)
     plt.title(f"Algebraic Initialization ({cfg.init.coarse_res}x{cfg.init.coarse_res})")
-    plt.imshow(img_coarse, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size))
+    plt.imshow(img_coarse, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
     plt.scatter(init_pos[:,0], init_pos[:,1], c='r', marker='x', label='Peaks')
     plt.legend()
+
     plt.show()
 
-def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, cfg: Config):
+def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, cfg: Config):
     """Shows GT, Gas Splatting reconstruction and loss history"""
 
     fig = plt.figure(figsize=(15, 5))
@@ -68,11 +70,11 @@ def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, l
     # 1. GT
     plt.subplot(2, 3, 1)
     plt.title(f"Ground Truth (Grid {cfg.sim.grid_res}x{cfg.sim.grid_res})")
-    plt.imshow(sim_data.img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
+    plt.imshow(sim_data.img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
 
     for i in range(0, len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
-        plt.plot([x0, x1], [y0, y1], 'w-', alpha=0.2, linewidth=0.5)
+        plt.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
     plt.colorbar(label="ppm")
 
     # 2. Reconstruction
@@ -81,7 +83,7 @@ def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, l
 
     plt.subplot(2, 3, 2)
     plt.title(f"GS Reconstruction")
-    plt.imshow(img_pred_gaussian, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
+    plt.imshow(img_pred_gaussian, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
     plt.colorbar(label="ppm")
     plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5)
 
@@ -89,7 +91,7 @@ def plot_final_results(gaussians: GasSplattingModel, sim_data: SimulationData, l
 
     plt.subplot(2, 3, 3)
     plt.title(f"GS Reconstruction (Grid)")
-    plt.imshow(img_pred, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='viridis')
+    plt.imshow(img_pred, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
     plt.colorbar(label="ppm")
 
     # 3. Loss History

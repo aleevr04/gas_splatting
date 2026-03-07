@@ -4,7 +4,7 @@ from config import Config
 from gs_model import GasSplattingModel
 from trainer import Trainer
 from utils.init_utils import lsqr_initialization
-from utils.plot_utils import plot_initial_guess, plot_final_results
+from utils.plot_utils import plot_initial_guess, plot_training_results
 from utils.sim_utils import generate_simulation_data
 
 
@@ -49,7 +49,7 @@ def main():
     print(f"Loss: {loss_history[-1]:.6f}")
 
     # --------- Plot Results --------
-    plot_final_results(model, sim_data, loss_history, cfg)
+    plot_training_results(model, sim_data, loss_history, cfg)
 
 if __name__ == "__main__":
     main()
