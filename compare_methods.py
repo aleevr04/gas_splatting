@@ -33,10 +33,15 @@ def main():
     grid_res = sim_data.img_gt.shape[0] 
     cell_size = cfg.sim.map_size / grid_res
     
-    system_matrix = create_system_matrix_sparse((grid_res, grid_res), sim_data.beams, cell_size).tocsr()
+    # Measure setup time for traditional methods (System Matrix)
+    print("Building system matrix...")
+    t_setup_start = time.time()
+    system_matrix = create_system_matrix_sparse((grid_res, grid_res), sim_data.beams.tolist(), cell_size).tocsr()
+    trad_setup_time = time.time() - t_setup_start
 
     reconstructions = {}
-    execution_times = {}
+    # Dictionary to hold both setup and reconstruction times
+    execution_times = {} 
     
     # ------- Traditional Methods -------
     print("\n--- Traditional Methods ---")
@@ -45,45 +50,50 @@ def main():
     art_iterations = 500
     art_name = f"ART ({art_iterations} it)"
     t_start = time.time()
-    art_res = tm.art(system_matrix, y_true, num_iterations=500)
-    execution_times[art_name] = time.time() - t_start
+    art_res = tm.art(system_matrix, y_true, num_iterations=art_iterations)
+    execution_times[art_name] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     reconstructions[art_name] = art_res.reshape((grid_res, grid_res))
     
     print("Tikhonov (Iterative)...")
     tikhonov_iterations = 5000
     tikhonov_name = f"Tikhonov ({tikhonov_iterations} it)"
     t_start = time.time()
-    tik_res = tm.tikhonov_iterative(system_matrix, y_true, alpha=0.1, num_iterations=5000)
-    execution_times[tikhonov_name] = time.time() - t_start
+    tik_res = tm.tikhonov_iterative(system_matrix, y_true, alpha=0.1, num_iterations=tikhonov_iterations)
+    execution_times[tikhonov_name] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     reconstructions[tikhonov_name] = tik_res.reshape((grid_res, grid_res))
     
     print("LFD (Low First Derivative)...")
     t_start = time.time()
     reconstructions["LFD"] = tm.lfd(system_matrix, y_true, grid_size=(grid_res, grid_res), alpha=0.05)
-    execution_times["LFD"] = time.time() - t_start
+    execution_times["LFD"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     
     print("LTD (Low Third Derivative)...")
     t_start = time.time()
     reconstructions["LTD"] = tm.ltd(system_matrix, y_true, grid_size=(grid_res, grid_res), alpha=0.01)
-    execution_times["LTD"] = time.time() - t_start
+    execution_times["LTD"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     
     # ------- Gas Splatting -------
     print("\n--- Gas Splatting ---")
     
-    t_start = time.time()
+    # Measure Setup Time for Gas Splatting
+    t_gs_setup_start = time.time()
     init_pos, init_concentration, init_std, _ = lsqr_initialization(
-        sim_data.beams, sim_data.y_true, cfg.sim.map_size, 
+        sim_data.beams.tolist(), sim_data.y_true, cfg.sim.map_size, 
         num_gaussians=cfg.init.initial_gaussians, coarse_res=cfg.init.coarse_res
     )
     
     model = GasSplattingModel(init_pos.shape[0], cfg).to(cfg.device)
     model.initialize_gaussians(init_pos.to(cfg.device), init_concentration.to(cfg.device), init_std)
+    gs_setup_time = time.time() - t_gs_setup_start
     
+    # Measure Reconstruction (Training) Time for Gas Splatting
+    t_gs_recon_start = time.time()
     trainer = Trainer(model, cfg)
-    trainer.train(sim_data.p_rays, sim_data.u_rays, sim_data.y_true)
+    trainer.train(sim_data.beams, sim_data.y_true)
+    gs_recon_time = time.time() - t_gs_recon_start
     
     gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, grid_res=grid_res)
-    execution_times["Gas Splatting"] = time.time() - t_start
+    execution_times["Gas Splatting"] = {'setup': gs_setup_time, 'recon': gs_recon_time}
     reconstructions["Gas Splatting"] = gs_img
     
     # ------ Evaluation and Visualization -----
@@ -96,7 +106,7 @@ def main():
     
     # GT
     im_gt = axes[0].imshow(gt_img, origin='lower', extent=extent, cmap='jet')
-    axes[0].set_title("Ground Truth")
+    axes[0].set_title("Ground Truth", fontsize=14)
     axes[0].axis('off')
     for i in range(0, len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
@@ -108,13 +118,16 @@ def main():
         nmse = nmse_loss(gt_img, img)
         data_range = gt_img.max() - gt_img.min()
         ssim_val = ssim(gt_img, img, data_range=data_range)
-        exec_time = execution_times[name]
+        
+        t_setup = execution_times[name]['setup']
+        t_recon = execution_times[name]['recon']
 
-        title = f"{name}\nNMSE: {nmse:.4f}\nSSIM: {ssim_val:.4f}\nTime:{exec_time:.2f} s"
-        print(f"{name:<20}: NMSE = {nmse:.4f} | SSIM = {ssim_val:.4f}")
+        # Multi-line title for clarity
+        title = f"{name}\nNMSE: {nmse:.4f} | SSIM: {ssim_val:.4f}\nSetup: {t_setup:.2f}s | Recon: {t_recon:.2f}s"
+        print(f"{name:<20}: NMSE = {nmse:.4f} | SSIM = {ssim_val:.4f} | Setup = {t_setup:.2f}s | Recon = {t_recon:.2f}s")
             
         im = axes[idx].imshow(img, origin='lower', extent=extent, cmap='jet')
-        axes[idx].set_title(title)
+        axes[idx].set_title(title, fontsize=14)
         axes[idx].axis('off')
         fig.colorbar(im, ax=axes[idx])
         
