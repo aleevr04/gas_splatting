@@ -4,7 +4,8 @@ import math
 
 from config import Config
 from utils.gaussian_utils import (
-    compute_predicted_projections,
+    compute_integral,
+    compute_definite_integral,
     inverse_sigmoid,
     inverse_softplus
 )
@@ -29,7 +30,7 @@ class GasSplattingModel(nn.Module):
         self._scale = nn.Parameter(torch.zeros(initial_gaussians, 2))
         self._rotation = nn.Parameter(torch.rand(initial_gaussians) * 2*torch.pi)
 
-    def initialize_gaussians(self, pos, concentration, std):
+    def initialize_gaussians(self, pos: torch.Tensor, concentration: torch.Tensor, std: torch.Tensor):
         """
         Overwrite random model parameters with an informed initialization.
 
@@ -38,35 +39,33 @@ class GasSplattingModel(nn.Module):
             concentration (Tensor (K,) or float): Initial concentration/weight per gaussian.
             std (float or Tensor): Initial standard deviation (scalar, (K,) or (K,2)).
         """
+
         with torch.no_grad():
             # --- Positions: store as logit(normalized_pos) so get_pos() -> sigmoid(_pos)*map_size
-            pos_t = torch.as_tensor(pos, dtype=self._pos.dtype, device=self._pos.device)
-            if pos_t.shape != (self.num_gaussians, 2):
-                raise ValueError(f"pos must have shape ({self.num_gaussians}, 2), got {tuple(pos_t.shape)}")
+            if pos.shape != (self.num_gaussians, 2):
+                raise ValueError(f"pos must have shape ({self.num_gaussians}, 2), got {tuple(pos.shape)}")
             
-            self._pos.data.copy_(inverse_sigmoid(pos_t, self.map_size))
+            self._pos.data.copy_(inverse_sigmoid(pos, self.map_size))
 
             # --- Concentration: inverse of softplus
-            c_t = torch.as_tensor(concentration, dtype=self._concentration.dtype, device=self._concentration.device)
-            if c_t.dim() == 0:
-                c_t = c_t.expand(self.num_gaussians)
-            elif c_t.numel() == self.num_gaussians and c_t.dim() == 1:
+            if concentration.dim() == 0:
+                concentration = concentration.expand(self.num_gaussians)
+            elif concentration.numel() == self.num_gaussians and concentration.dim() == 1:
                 pass
             else:
-                raise ValueError(f"concentration must be scalar or shape ({self.num_gaussians},), got {tuple(c_t.shape)}")
+                raise ValueError(f"concentration must be scalar or shape ({self.num_gaussians},), got {tuple(concentration.shape)}")
 
-            self._concentration.data.copy_(inverse_softplus(c_t))
+            self._concentration.data.copy_(inverse_softplus(concentration))
 
             # --- Scale: we store log(scale) in _scale so get_scale() = exp(_scale)
-            std_t = torch.as_tensor(std, dtype=self._scale.dtype, device=self._scale.device)
-            if std_t.dim() == 0:
-                scales = std_t * torch.ones((self.num_gaussians, 2), dtype=self._scale.dtype, device=self._scale.device)
-            elif std_t.shape == (self.num_gaussians,):
-                scales = std_t.unsqueeze(1).repeat(1, 2)
-            elif std_t.shape == (self.num_gaussians, 2):
-                scales = std_t
+            if std.dim() == 0:
+                scales = std * torch.ones((self.num_gaussians, 2), dtype=self._scale.dtype, device=self._scale.device)
+            elif std.shape == (self.num_gaussians,):
+                scales = std.unsqueeze(1).repeat(1, 2)
+            elif std.shape == (self.num_gaussians, 2):
+                scales = std
             else:
-                raise ValueError(f"std must be scalar, ({self.num_gaussians},) or ({self.num_gaussians},2), got {tuple(std_t.shape)}")
+                raise ValueError(f"std must be scalar, ({self.num_gaussians},) or ({self.num_gaussians},2), got {tuple(std.shape)}")
             
             self._scale.data.copy_(torch.log(scales))
 
@@ -107,12 +106,12 @@ class GasSplattingModel(nn.Module):
         
         return covariance_inverse
 
-    def forward(self, p_rays, u_rays):
+    def forward(self, beams):
         pos = self.get_pos()
         covariance_inverse = self.get_covariance_inverse()
         concentration = self.get_concentration()
         
-        return compute_predicted_projections(pos, covariance_inverse, concentration, p_rays, u_rays)
+        return compute_definite_integral(pos, covariance_inverse, concentration, beams)
 
     # -------- DENSIFICATION ----------
 

@@ -138,14 +138,14 @@ class Trainer:
             elif param_group["name"] == "concentration":
                 param_group["lr"] = self.concentration_lr_func(iteration)
 
-    def train(self, p_rays, u_rays, y_true):
+    def train(self, beams, y_true):
         loss_history = []
         pbar = tqdm(range(self.train_cfg.iterations), desc="Training", dynamic_ncols=True)
         
         for it in pbar:
             self.optimizer.zero_grad()
             
-            y_pred = self.model(p_rays, u_rays)
+            y_pred = self.model(beams)
 
             l1_loss = F.l1_loss(y_pred, y_true)
             

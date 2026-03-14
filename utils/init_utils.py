@@ -5,7 +5,7 @@ from skimage.feature import peak_local_max
 
 from utils.sim_utils import create_system_matrix_sparse, cell2xy
 
-def lsqr_initialization(beams, measurements, map_size, num_gaussians=None, coarse_res=20):
+def lsqr_initialization(beams: list, measurements, map_size: float, num_gaussians=None, coarse_res: int=20):
     """
     Runs a fast algebraic reconstruction (Least Squares) to get an initial estimate of the map and where to place the gaussians.
     """
@@ -54,5 +54,5 @@ def lsqr_initialization(beams, measurements, map_size, num_gaussians=None, coars
 
     return (torch.tensor(pos, dtype=torch.float32), 
             torch.tensor(concentration, dtype=torch.float32), 
-            std, 
+            torch.tensor(std, dtype=torch.float32), 
             img_coarse)

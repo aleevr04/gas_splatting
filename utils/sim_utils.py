@@ -13,9 +13,7 @@ from config import Config
 
 @dataclass
 class SimulationData:
-    beams: List[Tuple[Tuple[float, float], Tuple[float, float]]]
-    p_rays: torch.Tensor
-    u_rays: torch.Tensor
+    beams: torch.Tensor
     img_gt: np.ndarray
     y_true: torch.Tensor
 
@@ -277,29 +275,18 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     num_random_beams = cfg.sim.num_beams // 2
     num_radial_beams = cfg.sim.num_beams - num_random_beams 
     
-    beams = generate_random_beams(map_shape, num_random_beams)
-    beams += generate_radial_beams(map_shape, num_radial_beams)
+    beams_list = generate_random_beams(map_shape, num_random_beams)
+    beams_list += generate_radial_beams(map_shape, num_radial_beams)
 
-    p_list = []
-    u_list = []
-    for (start, end) in beams:
-        p = np.array(start)
-        u = np.array(end) - np.array(start) 
-        p_list.append(p)
-        u_list.append(u)
-
-    p_rays = torch.tensor(np.array(p_list), dtype=torch.float32, device=cfg.device)
-    u_rays = torch.tensor(np.array(u_list), dtype=torch.float32, device=cfg.device)
+    beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
 
     # ------- Measurements --------
     print("Simulating gas integrals...")
-    measurements_list = simulate_gas_integrals(img_gt, beams, cell_size)
+    measurements_list = simulate_gas_integrals(img_gt, beams_list, cell_size)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
 
     return SimulationData(
-        beams=beams,
-        p_rays=p_rays,
-        u_rays=u_rays,
+        beams=beams_tensor,
         img_gt=img_gt,
         y_true=y_true
     )

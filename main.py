@@ -23,7 +23,7 @@ def main():
     # -------- Initialize gaussians --------
     print(f"Running Least Squares initialization (Grid {cfg.init.coarse_res}x{cfg.init.coarse_res})")
     init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
-        sim_data.beams, 
+        sim_data.beams.tolist(), 
         sim_data.y_true, 
         cfg.sim.map_size, 
         num_gaussians=cfg.init.initial_gaussians,
@@ -35,7 +35,7 @@ def main():
     model.initialize_gaussians(
         init_pos.to(cfg.device), 
         init_concentration.to(cfg.device), 
-        init_std
+        init_std.to(cfg.device)
     )
     print("Model initialized")
 
@@ -45,7 +45,7 @@ def main():
     trainer = Trainer(model, cfg)
 
     print("Starting Gas Splatting training...")
-    loss_history = trainer.train(sim_data.p_rays, sim_data.u_rays, sim_data.y_true)
+    loss_history = trainer.train(sim_data.beams, sim_data.y_true)
     print(f"Loss: {loss_history[-1]:.6f}")
 
     # --------- Plot Results --------
