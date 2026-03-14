@@ -1,8 +1,12 @@
+import os
+import sys
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 from simple_parsing import ArgumentParser
 from skimage.metrics import structural_similarity as ssim
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import utils.tomo_utils as tm
 from config import Config
@@ -135,6 +139,12 @@ def main():
         axes[i].axis('off')
         
     plt.tight_layout()
+    
+    # Save plot
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods.png')
+    plt.savefig(save_path, dpi=300)
+    print(f"Plot saved in: {save_path}")
+    
     plt.show()
 
 if __name__ == "__main__":
