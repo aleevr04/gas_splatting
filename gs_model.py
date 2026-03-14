@@ -18,12 +18,12 @@ class GasSplattingModel(nn.Module):
         self.map_size = cfg.sim.map_size
         self.densify_cfg = cfg.densify
 
-        self.pos_grad_accum = torch.zeros((initial_gaussians, 1))
-        self.denom = torch.zeros((initial_gaussians, 1))
+        self.pos_grad_accum = torch.zeros((initial_gaussians, 1), device=cfg.device)
+        self.denom = torch.zeros((initial_gaussians, 1), device=cfg.device)
 
         self.splits = 0
         self.clones = 0
-        
+
         # --- Model parameters ---
         self._pos = nn.Parameter(torch.rand(initial_gaussians, 2) * self.map_size)
         self._concentration = nn.Parameter(torch.rand(initial_gaussians))
@@ -44,7 +44,7 @@ class GasSplattingModel(nn.Module):
             # --- Positions: store as logit(normalized_pos) so get_pos() -> sigmoid(_pos)*map_size
             if pos.shape != (self.num_gaussians, 2):
                 raise ValueError(f"pos must have shape ({self.num_gaussians}, 2), got {tuple(pos.shape)}")
-            
+
             self._pos.data.copy_(inverse_sigmoid(pos, self.map_size))
 
             # --- Concentration: inverse of softplus
@@ -66,7 +66,7 @@ class GasSplattingModel(nn.Module):
                 scales = std
             else:
                 raise ValueError(f"std must be scalar, ({self.num_gaussians},) or ({self.num_gaussians},2), got {tuple(std.shape)}")
-            
+
             self._scale.data.copy_(torch.log(scales))
 
             # --- Rotation: initialize to zero (no rotation) by default
@@ -74,7 +74,7 @@ class GasSplattingModel(nn.Module):
 
     def get_pos(self):
         return torch.sigmoid(self._pos) * self.map_size
-    
+
     def get_scale(self):
         return torch.exp(self._scale)
 
@@ -92,7 +92,7 @@ class GasSplattingModel(nn.Module):
         R = torch.stack([row1, row2], dim=1)  # (N, 2, 2)
 
         return R
-    
+
     def get_scale_square_inverse(self):
         scale_sq_inv = 1.0 / (self.get_scale()**2 + 1e-7)
         return torch.diag_embed(scale_sq_inv) # (N, 2, 2)
@@ -100,17 +100,17 @@ class GasSplattingModel(nn.Module):
     def get_covariance_inverse(self):
         R = self.get_rotation_matrix()
         S_sq_inv = self.get_scale_square_inverse()
-        
+
         # Sigma^-1 = R * S^-2 * R^T
         covariance_inverse = torch.bmm(R, torch.bmm(S_sq_inv, R.transpose(1, 2)))
-        
+
         return covariance_inverse
 
     def forward(self, beams):
         pos = self.get_pos()
         covariance_inverse = self.get_covariance_inverse()
         concentration = self.get_concentration()
-        
+
         return compute_definite_integral(pos, covariance_inverse, concentration, beams)
 
     # -------- DENSIFICATION ----------
@@ -128,7 +128,7 @@ class GasSplattingModel(nn.Module):
 
                 # Remove old state
                 del optimizer.state[group["params"][0]]
-                
+
                 # New param
                 group["params"][0] = nn.Parameter((group["params"][0][keep_mask].requires_grad_(True)))
 
@@ -136,11 +136,11 @@ class GasSplattingModel(nn.Module):
                 optimizer.state[group["params"][0]] = stored_state
             else:
                 group["params"][0] = nn.Parameter(group["params"][0][keep_mask].requires_grad_(True))
-            
+
             optimizable_tensors[group["name"]] = group["params"][0]
 
         return optimizable_tensors
-    
+
     def _cat_tensors_to_optimizer(self, optimizer: torch.optim.Optimizer, tensors_dict):
         optimizable_tensors = {}
 
@@ -174,10 +174,10 @@ class GasSplattingModel(nn.Module):
                         (group["params"][0], extension_tensor), dim=0
                     ).requires_grad_(True)
                 )
-            
+
             optimizable_tensors[group["name"]] = group["params"][0]
 
-        return optimizable_tensors      
+        return optimizable_tensors
 
     def prune(self, optimizer: torch.optim.Optimizer, mask):
         optimizable_tensors = self._prune_optimizer(optimizer, mask)
@@ -214,9 +214,9 @@ class GasSplattingModel(nn.Module):
     def split(self, optimizer: torch.optim.Optimizer, mask, N=2):
         # Generate new positions based on original gaussian functions
         stds = self.get_scale()[mask].repeat(N, 1)
-        means = torch.zeros((stds.size(0), 2))
+        means = torch.zeros((stds.size(0), 2), device=stds.device)
         samples = torch.normal(mean=means, std=stds)
-        
+
         # Transform to global coordinate system
         rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
         new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
@@ -248,8 +248,8 @@ class GasSplattingModel(nn.Module):
         # Prune original gaussians
         prune_mask = torch.cat(
             (
-                mask, 
-                torch.zeros(N * mask.sum(), dtype=torch.bool)
+                mask,
+                torch.zeros(N * mask.sum(), dtype=torch.bool, device=mask.device)
             )
         )
         self.prune(optimizer, prune_mask)
@@ -274,7 +274,7 @@ class GasSplattingModel(nn.Module):
         # Number of gaussians may have changed
         num_cloned = int(clone_mask.sum().item())
         if num_cloned > 0:
-            padding = torch.zeros(num_cloned, dtype=torch.bool)
+            padding = torch.zeros(num_cloned, dtype=torch.bool, device=split_mask.device)
             split_mask = torch.cat([split_mask, padding])
 
         self.split(optimizer, split_mask)
