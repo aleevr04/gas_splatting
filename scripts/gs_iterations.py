@@ -21,7 +21,7 @@ def nmse_loss(y_true, y_pred):
 def main():
     # --- Experiment settings ---
     iteration_list = [500, 1000, 2000, 3000, 5000]
-    seeds = [42, 100, 1234, 777, 999]
+    seeds = [42, 100, 1234, 777, 999, 123, 333, 10, 555, 22]
 
     parser = ArgumentParser()
     parser.add_arguments(Config, dest="cfg")
@@ -33,7 +33,7 @@ def main():
     results_nmse = {it: [] for it in iteration_list}
     results_time = {it: [] for it in iteration_list}
 
-    print(f"Starting experiment: {len(iteration_list)} iterations x {len(seeds)} seeds.")
+    print(f"Starting experiment: {len(iteration_list)} diferent iterations x {len(seeds)} seeds.")
 
     # --- Main Loop ---
     for iters in iteration_list:
@@ -101,7 +101,7 @@ def plot_results(iteration_list, results_nmse, results_time):
     ax.fill_between(iteration_list, 
                     np.array(nmse_means) - np.array(nmse_stds), 
                     np.array(nmse_means) + np.array(nmse_stds), 
-                    color='blue', alpha=0.2, label='Desviación Estándar')
+                    color='blue', alpha=0.2, label='Standard Deviation')
 
     ax.set_title("Error (NMSE) vs Number of Iterations")
     ax.set_xlabel("Training Iterations")

@@ -23,7 +23,7 @@ class TrainParams:
     scale_lr: float = 0.001
     rotation_lr: float = 0.001
     concentration_lr: float = 0.005
-    iterations: int = 3000
+    iterations: int = 1500
     target_loss: float = 1e-5
     no_live_vis: bool = field(default=False, action="store_true")
 
@@ -32,9 +32,9 @@ class DensificationParams:
     gradient_threshold: float = 0.08
     scale_threshold: float = 2.5
     prune_threshold: float = 0.005
-    densify_from: int = 200
-    densify_until: int = 1500
-    densify_interval: int = 100
+    densify_from: int = 100
+    densify_until: int = 750
+    densify_interval: int = 50
 
 @dataclass
 class Config:

@@ -51,29 +51,27 @@ def main():
     print("\n--- Traditional Methods ---")
     
     print("ART...")
-    art_iterations = 500
+    art_iterations = 400
     art_name = f"ART ({art_iterations} it)"
     t_start = time.time()
-    art_res = tm.art(system_matrix, y_true, num_iterations=art_iterations)
+    art_res = tm.art(system_matrix, y_true, num_iterations=art_iterations, relaxation_factor=1.6)
     execution_times[art_name] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     reconstructions[art_name] = art_res.reshape((grid_res, grid_res))
     
-    print("Tikhonov (Iterative)...")
-    tikhonov_iterations = 5000
-    tikhonov_name = f"Tikhonov ({tikhonov_iterations} it)"
+    print("Tikhonov...")
     t_start = time.time()
-    tik_res = tm.tikhonov_iterative(system_matrix, y_true, alpha=0.1, num_iterations=tikhonov_iterations)
-    execution_times[tikhonov_name] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
-    reconstructions[tikhonov_name] = tik_res.reshape((grid_res, grid_res))
-    
+    tik_res = tm.tikhonov_direct(system_matrix, y_true, alpha=0.2)
+    execution_times["Tikhonov"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
+    reconstructions["Tikhonov"] = tik_res.reshape((grid_res, grid_res))
+
     print("LFD (Low First Derivative)...")
     t_start = time.time()
-    reconstructions["LFD"] = tm.lfd(system_matrix, y_true, grid_size=(grid_res, grid_res), alpha=0.05)
+    reconstructions["LFD"] = tm.lfd(system_matrix, y_true, grid_size=(grid_res, grid_res), alpha=0.07)
     execution_times["LFD"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     
     print("LTD (Low Third Derivative)...")
     t_start = time.time()
-    reconstructions["LTD"] = tm.ltd(system_matrix, y_true, grid_size=(grid_res, grid_res), alpha=0.01)
+    reconstructions["LTD"] = tm.ltd(system_matrix, y_true, grid_size=(grid_res, grid_res), alpha=5.0)
     execution_times["LTD"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     
     # ------- Gas Splatting -------

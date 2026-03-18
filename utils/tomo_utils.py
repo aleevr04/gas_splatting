@@ -3,9 +3,8 @@ import scipy.sparse as sparse
 from scipy.sparse.linalg import lsqr
 from tqdm import tqdm
 
-
 #===============================
-# A. ART - ITERATIVE METHOD FOR ILL POSED PROBLEMS WITH NO PRIOR INFORMATION
+# ART - ITERATIVE METHOD FOR ILL POSED PROBLEMS WITH NO PRIOR INFORMATION
 #===============================
 def art(system_matrix, measurements, num_iterations, initial_guess=None, relaxation_factor=1.0):
     """
@@ -40,7 +39,7 @@ def art(system_matrix, measurements, num_iterations, initial_guess=None, relaxat
 
 
 #===============================
-# B. TIKHONOV - L2 norm regularization, penalizing solutions with high gas concentrations (stability)
+# TIKHONOV - L2 norm regularization, penalizing solutions with high gas concentrations (stability)
 #===============================
 def tikhonov_iterative(system_matrix: sparse.csr_matrix, measurements: np.ndarray, alpha: float, num_iterations: int = 100, initial_guess=None):
     """
@@ -56,12 +55,6 @@ def tikhonov_iterative(system_matrix: sparse.csr_matrix, measurements: np.ndarra
     else:
         reconstruction = initial_guess.copy()
 
-    # For direct solution (non-iterative), we can use:
-    # ATA = system_matrix.transpose().dot(system_matrix)
-    # L = sparse.identity(num_voxels) * alpha_reg
-    # rhs = system_matrix.transpose().dot(measurements)
-    # reconstruction = sparse.linalg.spsolve(ATA + L, rhs)
-
     # Implementing an iterative version (e.g., Landweber iteration with regularization)
     if num_iterations is None:
         num_iterations = 100
@@ -76,8 +69,6 @@ def tikhonov_iterative(system_matrix: sparse.csr_matrix, measurements: np.ndarra
         reconstruction[reconstruction < 0] = 0  # Enforce non-negativity
 
     return reconstruction
-
-
 
 def tikhonov_direct(system_matrix: sparse.csr_matrix, measurements: np.ndarray, alpha: float) -> np.ndarray:
     """
@@ -99,12 +90,13 @@ def tikhonov_direct(system_matrix: sparse.csr_matrix, measurements: np.ndarray, 
     rhs = system_matrix.transpose().dot(measurements)
     reconstruction_flat = sparse.linalg.spsolve(ATA + L, rhs)
 
+    # Avoid negative values
+    reconstruction_flat[reconstruction_flat < 0] = 0
+
     return reconstruction_flat
 
-
-
 #===============================
-# C. LFD - Low First Derivative (Smoothness)
+# LFD - Low First Derivative (Smoothness)
 #===============================
 def lfd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: tuple, alpha: float) -> np.ndarray:
     """
@@ -160,7 +152,7 @@ def lfd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: t
 
 
 #===============================
-# D. LSD - Low Second Derivative (Smoothness)
+# LSD - Low Second Derivative (Smoothness)
 #===============================
 def lsd(
     system_matrix: sparse.csr_matrix,
@@ -244,7 +236,7 @@ def lsd(
 
 
 #===============================
-# E. LTD (LOW THIRD DERIVATIVE)
+# LTD (LOW THIRD DERIVATIVE)
 #===============================
 
 def ltd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: tuple, alpha: float = 0.01) -> np.ndarray:
@@ -383,7 +375,7 @@ def ltd_weighted(system_matrix: sparse.csr_matrix, measurements: np.ndarray, gri
 
 
 #===============================
-# F. PDE Difusion Advection Regularization
+# PDE Difusion Advection Regularization
 #===============================
 def domain_knowledge_regularized_landweber_iterative(system_matrix: sparse.csr_matrix, measurements: np.ndarray, alpha: float = 0.01, rho: float = 0.001, num_iterations: int = 100, image_shape=None, flow_field=None, diffusion_coefficient=None, initial_guess=None):
     """
