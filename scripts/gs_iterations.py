@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import copy
+import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from simple_parsing import ArgumentParser
@@ -21,7 +22,7 @@ def nmse_loss(y_true, y_pred):
 def main():
     # --- Experiment settings ---
     iteration_list = [500, 1000, 2000, 3000, 5000]
-    seeds = [42, 100, 1234, 777, 999, 123, 333, 10, 555, 22]
+    seeds = [123, 555, 13, 69, 200]
 
     parser = ArgumentParser()
     parser.add_arguments(Config, dest="cfg")
@@ -60,7 +61,7 @@ def main():
 
             # Initialization
             init_pos, init_concentration, init_std, _ = lsqr_initialization(
-                sim_data.beams.tolist(), sim_data.y_true, cfg.sim.map_size, 
+                sim_data.beams.tolist(), sim_data.measurements, cfg.sim.map_size, 
                 num_gaussians=cfg.init.initial_gaussians, coarse_res=cfg.init.coarse_res
             )
             
@@ -70,7 +71,7 @@ def main():
             # Train
             t_start = time.time()
             trainer = Trainer(model, cfg)
-            trainer.train(sim_data.beams, sim_data.y_true)
+            trainer.train(sim_data.beams, y)
             train_time = time.time() - t_start
 
             # Evaluation
@@ -110,7 +111,7 @@ def plot_results(iteration_list, results_nmse, results_time):
     ax.legend()
 
     # Logaritmic scale if error's variance is high
-    # ax.set_yscale('log') 
+    ax.set_yscale('log') 
 
     plt.tight_layout()
     

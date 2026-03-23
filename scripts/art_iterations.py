@@ -14,15 +14,6 @@ from utils.sim_utils import generate_simulation_data, create_system_matrix_spars
 def nmse_loss(y_true, y_pred):
     return np.sum((y_pred - y_true)**2) / (np.sum(y_true**2) + 1e-8)
 
-def add_measurement_noise(y_true, snr_db=30):
-    """Adds white gaussian noise to measurements"""
-    signal_power = np.mean(y_true**2)
-    noise_power = signal_power / (10**(snr_db / 10))
-    noise = np.random.normal(0, np.sqrt(noise_power), size=y_true.shape)
-    y_noisy = y_true + noise
-    y_noisy[y_noisy < 0] = 0
-    return y_noisy
-
 def main():
     parser = ArgumentParser(description="Optimize ART Iterations")
     parser.add_arguments(Config, dest="cfg")
@@ -34,8 +25,8 @@ def main():
     print(f"Generating noisy simulation data (SNR={snr_db}dB)...")
     sim_data = generate_simulation_data(cfg)
     gt_img = sim_data.img_gt
-    y_noisy = add_measurement_noise(sim_data.y_true.cpu().numpy(), snr_db=snr_db)
-    # y_noisy = sim_data.y_true.cpu().numpy()
+
+    measurements = sim_data.measurements.cpu().numpy()
 
     grid_res = gt_img.shape[0] 
     cell_size = cfg.sim.map_size / grid_res
@@ -66,7 +57,7 @@ def main():
             # Use current guess to make "step" iterations
             current_guess = tm.art(
                 system_matrix, 
-                y_noisy, 
+                measurements, 
                 num_iterations=step, 
                 initial_guess=current_guess, 
                 relaxation_factor=rf

@@ -24,7 +24,7 @@ def main():
     print(f"Running Least Squares initialization (Grid {cfg.init.coarse_res}x{cfg.init.coarse_res})")
     init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
         sim_data.beams.tolist(), 
-        sim_data.y_true, 
+        sim_data.measurements, 
         cfg.sim.map_size, 
         num_gaussians=cfg.init.initial_gaussians,
         coarse_res=cfg.init.coarse_res
@@ -45,7 +45,7 @@ def main():
     trainer = Trainer(model, cfg)
 
     print("Starting Gas Splatting training...")
-    loss_history = trainer.train(sim_data.beams, sim_data.y_true)
+    loss_history = trainer.train(sim_data.beams, sim_data.measurements)
     print(f"Loss: {loss_history[-1]:.6f}")
 
     # --------- Plot Results --------

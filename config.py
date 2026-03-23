@@ -16,6 +16,8 @@ class SimulationParams:
     num_beams: int = 30
     num_blobs: int = 5
     no_gauss_filter: bool = field(default=False, action="store_true")
+    noise: bool = field(default=False, action="store_true")
+    snr_db: int = 30
 
 @dataclass
 class TrainParams:

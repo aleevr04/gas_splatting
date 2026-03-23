@@ -15,17 +15,6 @@ def nmse_loss(y_true, y_pred):
     """Normalized Mean Square Error"""
     return np.sum((y_pred - y_true)**2) / (np.sum(y_true**2) + 1e-8)
 
-def add_measurement_noise(y_true, snr_db=30):
-    """Adds white gaussian noise to measurements"""
-    signal_power = np.mean(y_true**2)
-    noise_power = signal_power / (10**(snr_db / 10))
-    noise = np.random.normal(0, np.sqrt(noise_power), size=y_true.shape)
-    y_noisy = y_true + noise
-    
-    y_noisy[y_noisy < 0] = 0
-    
-    return y_noisy
-
 def main():
     # --- Configuration ---
     parser = ArgumentParser(description="Optimize Hyperparameters for Traditional Methods")
@@ -36,14 +25,8 @@ def main():
     # --- Generate simulation data ---
     print("--- Simulation data ---")
     sim_data = generate_simulation_data(cfg)
-    y_true_clean = sim_data.y_true.cpu().numpy()
+    measurements = sim_data.measurements.cpu().numpy()
     gt_img = sim_data.img_gt
-    
-    # Add noise
-    # snr_db = 30
-    # print(f"Adding noise to measurements (SNR = {snr_db}dB)...")
-    # y_noisy = add_measurement_noise(y_true_clean, snr_db=snr_db)
-    y_noisy = y_true_clean
     
     grid_res = gt_img.shape[0] 
     cell_size = cfg.sim.map_size / grid_res
@@ -67,26 +50,26 @@ def main():
     # TIKHONOV
     print("Evaluating Tikhonov...")
     for alpha in tqdm(alphas, leave=False):
-        recon = tm.tikhonov_direct(system_matrix, y_noisy, alpha)
+        recon = tm.tikhonov_direct(system_matrix, measurements, alpha)
         recon_img = recon.reshape((grid_res, grid_res))
         results["Tikhonov"]["errors"].append(nmse_loss(gt_img, recon_img))
 
     # LFD
     print("Evaluating LFD...")
     for alpha in tqdm(alphas, leave=False):
-        recon = tm.lfd(system_matrix, y_noisy, (grid_res, grid_res), alpha)
+        recon = tm.lfd(system_matrix, measurements, (grid_res, grid_res), alpha)
         results["LFD"]["errors"].append(nmse_loss(gt_img, recon))
         
     # LSD
     print("Evaluating LSD...")
     for alpha in tqdm(alphas, leave=False):
-        recon = tm.lsd(system_matrix, y_noisy, (grid_res, grid_res), alpha)
+        recon = tm.lsd(system_matrix, measurements, (grid_res, grid_res), alpha)
         results["LSD"]["errors"].append(nmse_loss(gt_img, recon))
 
     # LTD
     print("Evaluating LTD...")
     for alpha in tqdm(alphas, leave=False):
-        recon = tm.ltd(system_matrix, y_noisy, (grid_res, grid_res), alpha)
+        recon = tm.ltd(system_matrix, measurements, (grid_res, grid_res), alpha)
         results["LTD"]["errors"].append(nmse_loss(gt_img, recon))
 
     # ART
@@ -95,7 +78,7 @@ def main():
         # Deactivate ART internal progress bar
         import utils.tomo_utils as temp_tm
         temp_tm.tqdm = lambda x, **kwargs: x 
-        recon = temp_tm.art(system_matrix, y_noisy, num_iterations=300, relaxation_factor=rf)
+        recon = temp_tm.art(system_matrix, measurements, num_iterations=300, relaxation_factor=rf)
         recon_img = recon.reshape((grid_res, grid_res))
         results["ART"]["errors"].append(nmse_loss(gt_img, recon_img))
 

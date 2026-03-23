@@ -15,6 +15,7 @@ from config import Config
 class SimulationData:
     beams: torch.Tensor
     img_gt: np.ndarray
+    measurements: torch.Tensor
     y_true: torch.Tensor
 
 
@@ -178,7 +179,7 @@ def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_
     map_width = cols * cell_dimensions_meters
     map_height = rows * cell_dimensions_meters
 
-    for (x0, y0), (x1, y1) in tqdm(beams, desc="TDLAS_simulation"):
+    for (x0, y0), (x1, y1) in tqdm(beams, desc="Gas Integrals Simulation"):
         if not (0 <= x0 <= map_width and 0 <= y0 <= map_height and
                 0 <= x1 <= map_width and 0 <= y1 <= map_height):
             print(f"Warning: Beam ({x0}, {y0}) - ({x1}, {y1}) is out of map boundaries. Skipping.")
@@ -249,6 +250,15 @@ def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_m
 #         GENERATE GROUND TRUTH
 # ==========================================
 
+def add_measurement_noise(y_true, snr_db=30):
+    y_true_np = y_true.cpu().numpy()
+    signal_power = np.mean(y_true_np**2)
+    noise_power = signal_power / (10**(snr_db / 10))
+    noise = np.random.normal(0, np.sqrt(noise_power), size=y_true_np.shape)
+    y_noisy = y_true_np + noise
+    y_noisy[y_noisy < 0] = 0
+    return torch.tensor(y_noisy, dtype=torch.float32, device=y_true.device)
+
 def generate_simulation_data(cfg: Config) -> SimulationData:
     """Generates gas distribution (ground truth), beams and measurements"""
     
@@ -266,7 +276,6 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
         grid_size=grid_shape, 
         num_blobs=cfg.sim.num_blobs, 
         gauss_filter=not cfg.sim.no_gauss_filter,
-        #seed=cfg.seed
     )
 
     # ------ Beams ------
@@ -281,12 +290,18 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
 
     # ------- Measurements --------
-    print("Simulating gas integrals...")
     measurements_list = simulate_gas_integrals(img_gt, beams_list, cell_size)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
+
+    if cfg.sim.noise:
+        print(f"Adding noise to the measurements ({cfg.sim.snr_db} dB)...")
+        measurements = add_measurement_noise(y_true, snr_db=cfg.sim.snr_db)
+    else:
+        measurements = y_true
 
     return SimulationData(
         beams=beams_tensor,
         img_gt=img_gt,
+        measurements=measurements,
         y_true=y_true
     )

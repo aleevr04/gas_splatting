@@ -16,8 +16,8 @@ from utils.init_utils import lsqr_initialization
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import render_gaussian_map
 
-def nmse_loss(y_true, y_pred):
-    return np.sum((y_pred - y_true)**2) / (np.sum(y_true**2) + 1e-8)
+def nmse_loss(measurements, y_pred):
+    return np.sum((y_pred - measurements)**2) / (np.sum(measurements**2) + 1e-8)
 
 def main():
     # --- Configuration ---
@@ -56,7 +56,7 @@ def main():
             
             # Simulation data
             sim_data = generate_simulation_data(cfg)
-            y_true = sim_data.y_true.cpu().numpy()
+            measurements = sim_data.measurements.cpu().numpy()
             gt_img = sim_data.img_gt
             cell_size = cfg.sim.map_size / res
             
@@ -69,25 +69,25 @@ def main():
             
             # --- ART ---
             t0 = time.time()
-            art_res = tm.art(system_matrix, y_true, num_iterations=500, relaxation_factor=0.1)
+            art_res = tm.art(system_matrix, measurements, num_iterations=500, relaxation_factor=0.1)
             results_time["ART"][res].append(trad_setup_time + (time.time() - t0))
             results_nmse["ART"][res].append(nmse_loss(gt_img, art_res.reshape((res, res))))
             
             # --- Tikhonov (Direct) ---
             t0 = time.time()
-            tik_res = tm.tikhonov_direct(system_matrix, y_true, alpha=0.1)
+            tik_res = tm.tikhonov_direct(system_matrix, measurements, alpha=0.1)
             results_time["Tikhonov"][res].append(trad_setup_time + (time.time() - t0))
             results_nmse["Tikhonov"][res].append(nmse_loss(gt_img, tik_res.reshape((res, res))))
             
             # --- LFD ---
             t0 = time.time()
-            lfd_res = tm.lfd(system_matrix, y_true, grid_size=(res, res), alpha=0.05)
+            lfd_res = tm.lfd(system_matrix, measurements, grid_size=(res, res), alpha=0.05)
             results_time["LFD"][res].append(trad_setup_time + (time.time() - t0))
             results_nmse["LFD"][res].append(nmse_loss(gt_img, lfd_res))
             
             # --- LTD ---
             t0 = time.time()
-            ltd_res = tm.ltd(system_matrix, y_true, grid_size=(res, res), alpha=0.01)
+            ltd_res = tm.ltd(system_matrix, measurements, grid_size=(res, res), alpha=0.01)
             results_time["LTD"][res].append(trad_setup_time + (time.time() - t0))
             results_nmse["LTD"][res].append(nmse_loss(gt_img, ltd_res))
 
@@ -97,7 +97,7 @@ def main():
             # Setup (LSQR Initialization + Model)
             t_gs_setup = time.time()
             init_pos, init_concentration, init_std, _ = lsqr_initialization(
-                sim_data.beams.tolist(), sim_data.y_true, cfg.sim.map_size, 
+                sim_data.beams.tolist(), sim_data.measurements, cfg.sim.map_size, 
                 num_gaussians=cfg.init.initial_gaussians, coarse_res=cfg.init.coarse_res
             )
             model = GasSplattingModel(init_pos.shape[0], cfg).to(cfg.device)
@@ -107,7 +107,7 @@ def main():
             # Training
             t_gs_train = time.time()
             trainer = Trainer(model, cfg)
-            trainer.train(sim_data.beams, sim_data.y_true)
+            trainer.train(sim_data.beams, sim_data.measurements)
             gs_train_time = time.time() - t_gs_train
             
             results_time["Gas Splatting"][res].append(gs_setup_time + gs_train_time)

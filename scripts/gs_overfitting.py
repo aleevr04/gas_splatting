@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import copy
 import torch
 import numpy as np
@@ -66,8 +65,8 @@ def main():
             # Simulation data
             sim_data = generate_simulation_data(cfg)
 
-            y_true_training = sim_data.y_true[:training_beams]
-            y_true_validation = sim_data.y_true[training_beams:]
+            y_true_training = sim_data.measurements[:training_beams]
+            y_true_validation = sim_data.measurements[training_beams:]
 
             beams_training = sim_data.beams[:training_beams]
             beams_validation = sim_data.beams[training_beams:]            
@@ -99,29 +98,47 @@ def main():
 
 
 def plot_results(iteration_list, training_error, validation_error):
+    # Calculate means
     training_means = [np.mean(training_error[it]) for it in iteration_list]
     validation_means = [np.mean(validation_error[it]) for it in iteration_list]
+    
+    # Calculate standard deviations
+    training_stds = [np.std(training_error[it]) for it in iteration_list]
+    validation_stds = [np.std(validation_error[it]) for it in iteration_list]
     
     plt.rcParams.update({'font.size': 14})
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Draw means
-    ax.plot(iteration_list, training_means, 'g-o', linewidth=2, label='Training Error')
-    ax.plot(iteration_list, validation_means, 'b-o', linewidth=2, label='Validation Error')
+    # Draw Training Error (Mean + Std)
+    ax.plot(iteration_list, training_means, 'g-o', linewidth=2, label='Training Error Mean')
+    ax.fill_between(iteration_list, 
+                    np.array(training_means) - np.array(training_stds), 
+                    np.array(training_means) + np.array(training_stds), 
+                    color='green', alpha=0.15, label='Training Error Std')
+
+    # Draw Validation Error (Mean + Std)
+    ax.plot(iteration_list, validation_means, 'b-o', linewidth=2, label='Validation Error Mean')
+    ax.fill_between(iteration_list, 
+                    np.array(validation_means) - np.array(validation_stds), 
+                    np.array(validation_means) + np.array(validation_stds), 
+                    color='blue', alpha=0.15, label='Validation Error Std')
 
     ax.set_title("Overfitting Test\n")
     ax.set_xlabel("Iterations")
     ax.set_ylabel("Normalized Mean Square Error (NMSE)")
     ax.grid(True, linestyle='--', alpha=0.7)
-    ax.legend()
+    
+    # Move legend to a place where it doesn't overlap the lines easily
+    ax.legend(loc='upper right', fontsize=10)
 
-    # Logaritmic scale if error's variance is high
+    # Logarithmic scale if error's variance is high
     # ax.set_yscale('log') 
 
     plt.tight_layout()
     
     # Save plot
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'overfitting.png')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300)
     print(f"Plot saved in: {save_path}")
     
