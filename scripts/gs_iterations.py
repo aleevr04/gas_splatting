@@ -71,7 +71,7 @@ def main():
             # Train
             t_start = time.time()
             trainer = Trainer(model, cfg)
-            trainer.train(sim_data.beams, y)
+            trainer.train(sim_data.beams, sim_data.measurements)
             train_time = time.time() - t_start
 
             # Evaluation

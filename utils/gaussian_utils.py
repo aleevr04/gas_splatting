@@ -20,46 +20,25 @@ def compute_integral(pos, cov_inv, concentration, beams):
         y_pred (Tensor (N,)): Predicted projections
     """
 
-    K = pos.shape[0]
-    N = beams.shape[0]
-
     p_rays = beams[:, 0, :] # Starting points (N, 2)
 
     u_rays = beams[:, 1, :] - p_rays # u = E - S
     # Normalize rays' vectors
     u = u_rays / torch.norm(u_rays, dim=1, keepdim=True)
 
-    u_vec = u.view(N, 1, 2, 1) # (N, 2) -> (N, 1, 2, 1)
-    u_vec_T = u_vec.transpose(-1, -2) # (N, 2) -> (N, 1, 1, 2)
-
     # d = p - mu
     # p (N, 1, 2) - mu (1, K, 2) = d (N, K, 2)
     diff = p_rays.unsqueeze(1) - pos.unsqueeze(0)
-    
-    d_vec = diff.unsqueeze(-1) # (N, K, 2, 1)
-    d_vec_T = d_vec.transpose(-1, -2) # (N, K, 1, 2)
-    
-    Sigma_inv_exp = cov_inv.unsqueeze(0) # (K, 2, 2) -> (1, K, 2, 2)
 
-    # Sigma^-1 * u
-    # (1, K, 2, 2) @ (N, 1, 2, 1) -> (N, K, 2, 1)
-    Sig_u = torch.matmul(Sigma_inv_exp, u_vec)
+    # A = 0.5 * u^T * Sigma^-1 * u
+    A = 0.5 * torch.einsum('ni,kij,nj->nk', u, cov_inv, u)
+    A = torch.clamp(A, min=1e-8)
 
-    # Sigma^-1 * d
-    # (1, K, 2, 2) @ (N, K, 2, 1) -> (N, K, 2, 1)
-    Sig_d = torch.matmul(Sigma_inv_exp, d_vec)
+    # B = u^T * Sigma^-1 * d
+    B = torch.einsum('ni,kij,nkj->nk', u, cov_inv, diff)
 
-    # A = 0.5 * u^T * (Sigma^-1 * u)
-    # (N, 1, 1, 2) @ (N, K, 2, 1) -> (N, K, 1, 1)
-    A = 0.5 * torch.matmul(u_vec_T, Sig_u).squeeze(-1).squeeze(-1)
-
-    # B = u^T * (Sigma^-1 * d)
-    # (N, 1, 1, 2) @ (N, K, 2, 1) -> (N, K, 1, 1)
-    B = torch.matmul(u_vec_T, Sig_d).squeeze(-1).squeeze(-1)
-
-    # C = 0.5 * d^T * (Sigma^-1 * d)
-    # (N, K, 1, 2) @ (N, K, 2, 1) -> (N, K, 1, 1)
-    C = 0.5 * torch.matmul(d_vec_T, Sig_d).squeeze(-1).squeeze(-1)
+    # C = 0.5 * d^T * Sigma^-1 * d
+    C = 0.5 * torch.einsum('nki,kij,nkj->nk', diff, cov_inv, diff)
     
     term_exp = (B**2) / (4 * A) - C
     
@@ -83,8 +62,6 @@ def compute_definite_integral(pos, cov_inv, concentration, beams):
     Returns:
         y_pred (Tensor (N,)): Predicted projections
     """
-    K = pos.shape[0]
-    N = beams.shape[0]
 
     # Extract starting (S) and ending (E) points 
     start_rays = beams[:, 0, :] # (N, 2)
@@ -94,37 +71,20 @@ def compute_definite_integral(pos, cov_inv, concentration, beams):
     v_rays = end_rays - start_rays
     ray_lengths = torch.norm(v_rays, dim=1) # (N,)
 
-    v_vec = v_rays.view(N, 1, 2, 1) # (N, 2) -> (N, 1, 2, 1)
-    v_vec_T = v_vec.transpose(-1, -2) # (N, 1, 1, 2)
-
     # d = S - mu
     # start_rays (N, 1, 2) - pos (1, K, 2) = d (N, K, 2)
     diff = start_rays.unsqueeze(1) - pos.unsqueeze(0)
     
-    d_vec = diff.unsqueeze(-1) # (N, K, 2, 1)
-    d_vec_T = d_vec.transpose(-1, -2) # (N, K, 1, 2)
-    
-    Sigma_inv_exp = cov_inv.unsqueeze(0) # (K, 2, 2) -> (1, K, 2, 2)
-
-    # Sigma^-1 * v
-    # (1, K, 2, 2) @ (N, 1, 2, 1) -> (N, K, 2, 1)
-    Sig_v = torch.matmul(Sigma_inv_exp, v_vec)
-
-    # Sigma^-1 * d
-    # (1, K, 2, 2) @ (N, K, 2, 1) -> (N, K, 2, 1)
-    Sig_d = torch.matmul(Sigma_inv_exp, d_vec)
-
-    # A = 0.5 * v^T * (Sigma^-1 * v)
-    # (N, 1, 1, 2) @ (N, K, 2, 1) -> (N, K, 1, 1) -> (N, K)
-    A = 0.5 * torch.matmul(v_vec_T, Sig_v).squeeze(-1).squeeze(-1)
+    # A = 0.5 * v^T * Sigma^-1 * v
+    A = 0.5 * torch.einsum('ni,kij,nj->nk', v_rays, cov_inv, v_rays)
     A = torch.clamp(A, min=1e-8)
 
-    # B = v^T * (Sigma^-1 * d)
-    B = torch.matmul(v_vec_T, Sig_d).squeeze(-1).squeeze(-1) # (N, K)
+    # B = v^T * Sigma^-1 * d
+    B = torch.einsum('ni,kij,nkj->nk', v_rays, cov_inv, diff)
 
-    # C = 0.5 * d^T * (Sigma^-1 * d)
-    C = 0.5 * torch.matmul(d_vec_T, Sig_d).squeeze(-1).squeeze(-1) # (N, K)
-    
+    # C = 0.5 * d^T * Sigma^-1 * d
+    C = 0.5 * torch.einsum('nki,kij,nkj->nk', diff, cov_inv, diff)
+
     # exp(B^2 / 4A - C)
     term_exp = torch.exp((B**2) / (4 * A) - C)
     
