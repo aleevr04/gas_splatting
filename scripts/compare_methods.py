@@ -100,9 +100,11 @@ def main():
     
     # ------ Evaluation and Visualization -----
     print("\n--- Results ---")
-    gt_img = sim_data.img_gt
     
+    gt_img = sim_data.img_gt
     num_methods = len(reconstructions)
+
+    # --- FIGURE 1: RECONSTRUCTIONS ---
     fig, axes = plt.subplots(2, (num_methods + 2) // 2, figsize=(16, 8))
     axes = axes.flatten()
     
@@ -138,10 +140,45 @@ def main():
         
     plt.tight_layout()
     
-    # Save plot
+    # Save reconstructions plot
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods.png')
     plt.savefig(save_path, dpi=300)
-    print(f"Plot saved in: {save_path}")
+    print(f"Reconstructions plot saved in: {save_path}")
+
+    # --- FIGURE 2: ERROR MAPS ---
+    print("\n--- Generating Error Maps ---")
+    fig_err, axes_err = plt.subplots(2, (num_methods + 1) // 2, figsize=(16, 8))
+    axes_err = axes_err.flatten()
+    fig_err.suptitle("Spatial Error Distribution (Absolute Difference)", fontsize=18)
+
+    # Compute absolute error maps and find the global maximum for a consistent color scale
+    error_maps = {}
+    global_max_err = 0.0
+    for name, img in reconstructions.items():
+        err_map = np.abs(img - gt_img)
+        error_maps[name] = err_map
+        if err_map.max() > global_max_err:
+            global_max_err = err_map.max()
+
+    # Plot each error map
+    for idx, (name, err_map) in enumerate(error_maps.items()):
+        # Using a colormap like 'hot' or 'Reds' is standard for error visualization
+        # vmin=0 and vmax=global_max_err ensures all plots use the exact same color scale
+        im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='hot', vmin=0, vmax=global_max_err)
+        axes_err[idx].set_title(f"{name} Error", fontsize=14)
+        axes_err[idx].axis('off')
+        fig_err.colorbar(im_err, ax=axes_err[idx])
+
+    # Hide any unused subplots
+    for i in range(len(error_maps), len(axes_err)):
+        axes_err[i].axis('off')
+
+    plt.tight_layout()
+    
+    # Save error maps plot
+    save_path_err = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods_errors.png')
+    plt.savefig(save_path_err, dpi=300)
+    print(f"Error maps plot saved in: {save_path_err}")
     
     plt.show()
 
