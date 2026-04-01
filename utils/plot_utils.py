@@ -5,18 +5,22 @@ from config import Config
 from gs_model import GasSplattingModel
 from utils.sim_utils import SimulationData
 
-def render_gaussian_map(gaussians: GasSplattingModel, map_size: float, device: torch.device, grid_res=100):
+def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, float], device: torch.device, cell_size):
     """
     Turns gaussians into a 2D image (numpy matrix)
     """
 
+    w_cells = int(map_size[0] / cell_size)
+    h_cells = int(map_size[1] / cell_size)
+
     # Grid
-    x = torch.linspace(0, map_size, grid_res, device=device)
-    y = torch.linspace(0, map_size, grid_res, device=device)
+    x = torch.linspace(0, map_size[0], w_cells, device=device)
+    y = torch.linspace(0, map_size[1], h_cells, device=device)
     X, Y = torch.meshgrid(x, y, indexing='xy')
     grid_pos = torch.stack([X, Y], dim=-1) # (H, W, 2)
 
-    final_img = torch.zeros((grid_res, grid_res), device=device)
+    # PyTorch expects (H, W) -> (h_cells, w_cells)
+    final_img = torch.zeros((h_cells, w_cells), device=device)
 
     with torch.no_grad():
         pos = gaussians.get_pos()
@@ -38,22 +42,23 @@ def render_gaussian_map(gaussians: GasSplattingModel, map_size: float, device: t
             
             final_img += c * torch.exp(-0.5 * dist)
 
-    # Retornar como numpy array (para tomo_utils)
     return final_img.detach().cpu().numpy()
 
 def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
     """Shows ground truth and initial reconstruction image"""
 
+    map_w, map_h = cfg.sim.map_size
+
     plt.figure(figsize=(12, 5))
 
     plt.subplot(1, 2, 1)
-    plt.title(f"Ground Truth ({cfg.sim.grid_res}x{cfg.sim.grid_res})")
-    plt.imshow(img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
+    plt.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
     plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
 
     plt.subplot(1, 2, 2)
-    plt.title(f"Algebraic Initialization ({cfg.init.coarse_res}x{cfg.init.coarse_res})")
-    plt.imshow(img_coarse, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
+    plt.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
     plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
     plt.scatter(init_pos[:,0], init_pos[:,1], c='r', marker='x', label='Peaks')
     plt.legend()
@@ -63,13 +68,17 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
 def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, cfg: Config):
     """Shows GT, Gas Splatting reconstruction and loss history"""
 
+    map_w, map_h = cfg.sim.map_size
+    grid_w = int(map_w / cfg.sim.cell_size)
+    grid_h = int(map_h / cfg.sim.cell_size)
+
     fig = plt.figure(figsize=(15, 5))
     fig.suptitle(f"Initial Gaussians = {gaussians.initial_gaussians}\nFinal Gaussians = {gaussians.num_gaussians}\nBeams = {cfg.sim.num_beams}")
 
     # 1. GT
     plt.subplot(2, 3, 1)
-    plt.title(f"Ground Truth (Grid {cfg.sim.grid_res}x{cfg.sim.grid_res})")
-    plt.imshow(sim_data.img_gt, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.title(f"Ground Truth (Grid {grid_w}x{grid_h})")
+    plt.imshow(sim_data.img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
 
     for i in range(0, len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
@@ -77,20 +86,20 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     plt.colorbar(label="ppm")
 
     # 2. Reconstruction
-    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, grid_res=100)
+    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=0.1)
     pos = gaussians.get_pos().detach().cpu().numpy()
 
     plt.subplot(2, 3, 2)
     plt.title(f"GS Reconstruction")
-    plt.imshow(img_pred_gaussian, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
     plt.colorbar(label="ppm")
     plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5)
 
-    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cfg.sim.grid_res)
+    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
 
     plt.subplot(2, 3, 3)
     plt.title(f"GS Reconstruction (Grid)")
-    plt.imshow(img_pred, origin='lower', extent=(0, cfg.sim.map_size, 0, cfg.sim.map_size), cmap='jet')
+    plt.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
     plt.colorbar(label="ppm")
 
     # 3. Loss History

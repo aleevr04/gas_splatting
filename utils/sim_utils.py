@@ -2,7 +2,6 @@ import math
 import torch
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Tuple
 from shapely.geometry import LineString, Polygon
 from tqdm import tqdm
 from scipy.sparse import dok_matrix
@@ -265,15 +264,15 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     if cfg.seed:
         np.random.seed(cfg.seed)
 
-    map_shape = (cfg.sim.map_size, cfg.sim.map_size)
-    grid_shape = (cfg.sim.grid_res, cfg.sim.grid_res)
-    cell_size = cfg.sim.map_size / cfg.sim.grid_res
+    map_w, map_h = cfg.sim.map_size
+    grid_w = int(map_w / cfg.sim.cell_size)
+    grid_h = int(map_h / cfg.sim.cell_size)
 
     # ----- Ground Truth -----
     print("Generating Ground Truth...")
     
     img_gt = generate_gas_distribution(
-        grid_size=grid_shape, 
+        grid_size=(grid_h, grid_w), 
         num_blobs=cfg.sim.num_blobs, 
         gauss_filter=not cfg.sim.no_gauss_filter,
     )
@@ -284,13 +283,13 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     num_random_beams = cfg.sim.num_beams // 2
     num_radial_beams = cfg.sim.num_beams - num_random_beams 
     
-    beams_list = generate_random_beams(map_shape, num_random_beams)
-    beams_list += generate_radial_beams(map_shape, num_radial_beams)
+    beams_list = generate_random_beams(cfg.sim.map_size, num_random_beams)
+    beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
 
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
 
     # ------- Measurements --------
-    measurements_list = simulate_gas_integrals(img_gt, beams_list, cell_size)
+    measurements_list = simulate_gas_integrals(img_gt, beams_list, cfg.sim.cell_size)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
 
     if cfg.sim.noise:

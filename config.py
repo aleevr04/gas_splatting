@@ -1,23 +1,25 @@
 import torch
 
-from typing import Optional
+from typing import Optional, Tuple
 from dataclasses import dataclass
 from simple_parsing import field
 
 @dataclass
 class InitParams:
     initial_gaussians: Optional[int] = None
-    coarse_res: int = 10
+    coarse_cell_size: float = 2.5
 
 @dataclass
 class SimulationParams:
-    map_size: float = 20.0
-    grid_res: int = 20
+    map_size: Tuple[float, float] = (20.0, 20.0) # (map_width, map_height). Ignored when a csv file is provided
+    cell_size: float = 1.0
+
     num_beams: int = 30
     num_blobs: int = 5
     no_gauss_filter: bool = field(default=False, action="store_true")
-    noise: bool = field(default=False, action="store_true")
-    snr_db: int = 30
+    
+    noise: bool = field(default=False, action="store_true") # Add noise to simulated measurements
+    snr_db: int = 30 # Signal-to-noise ratio (dB)
 
 @dataclass
 class TrainParams:

@@ -3,7 +3,7 @@ import torch
 def inverse_softplus(x):
     return torch.log(torch.exp(x) - 1)
 
-def inverse_sigmoid(x, norm_factor=1.0):
+def inverse_sigmoid(x, norm_factor):
     return torch.logit(x / norm_factor)
 
 def compute_integral(pos, cov_inv, concentration, beams):

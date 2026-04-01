@@ -11,8 +11,6 @@ from gs_model import GasSplattingModel
 
 class LiveVisualizer:
     def __init__(self, map_size):
-        self.map_size = map_size
-        
         # Interactive mode
         plt.ion()
         self.fig, (self.ax_loss, self.ax_map) = plt.subplots(1, 2, figsize=(12, 5))
@@ -27,8 +25,8 @@ class LiveVisualizer:
 
         # Gaussians
         self.ax_map.set_title("Gaussians' positions")
-        self.ax_map.set_xlim(0, map_size)
-        self.ax_map.set_ylim(0, map_size)
+        self.ax_map.set_xlim(0, map_size[0])
+        self.ax_map.set_ylim(0, map_size[1])
         self.ax_map.set_aspect('equal')
         self.ax_map.grid(True, linestyle='--', alpha=0.5)
         

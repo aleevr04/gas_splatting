@@ -15,7 +15,7 @@ class GasSplattingModel(nn.Module):
         super().__init__()
         self.initial_gaussians = initial_gaussians
         self.num_gaussians = initial_gaussians
-        self.map_size = cfg.sim.map_size
+        self.map_size = torch.tensor(cfg.sim.map_size, device=cfg.device)
         self.densify_cfg = cfg.densify
 
         self.pos_grad_accum = torch.zeros((initial_gaussians, 1), device=cfg.device)
@@ -222,7 +222,8 @@ class GasSplattingModel(nn.Module):
         new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
 
         # Avoid invalid positions and transform to parameter's space
-        new_pos = torch.clamp(new_pos, min=1e-5, max=self.map_size - 1e-5)
+        new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
+        new_pos = torch.min(new_pos, self.map_size - 1e-5)
         new_pos = inverse_sigmoid(new_pos, self.map_size)
 
         # Divide original concentration by N
