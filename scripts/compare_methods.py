@@ -10,9 +10,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import utils.tomo_utils as tm
 from config import Config
-from gs_model import GasSplattingModel
 from trainer import Trainer
-from utils.init_utils import lsqr_initialization
+from utils.init_utils import setup_gs_model
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import render_gaussian_map
 
@@ -32,15 +31,12 @@ def main():
     sim_data = generate_simulation_data(cfg)
     measurements = sim_data.measurements.cpu().numpy()
     
-    extent = (0, cfg.sim.map_size, 0, cfg.sim.map_size)
-
-    grid_res = sim_data.img_gt.shape[0] 
-    cell_size = cfg.sim.map_size / grid_res
+    extent = (0, cfg.sim.map_size[0], 0, cfg.sim.map_size[1])
     
     # Measure setup time for traditional methods (System Matrix)
     print("Building system matrix...")
     t_setup_start = time.time()
-    system_matrix = create_system_matrix_sparse((grid_res, grid_res), sim_data.beams.tolist(), cell_size).tocsr()
+    system_matrix = create_system_matrix_sparse(sim_data.img_gt.shape, sim_data.beams.tolist(), cfg.sim.cell_size).tocsr()
     trad_setup_time = time.time() - t_setup_start
 
     reconstructions = {}
@@ -56,22 +52,22 @@ def main():
     t_start = time.time()
     art_res = tm.art(system_matrix, measurements, num_iterations=art_iterations, relaxation_factor=1.6)
     execution_times[art_name] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
-    reconstructions[art_name] = art_res.reshape((grid_res, grid_res))
+    reconstructions[art_name] = art_res.reshape(sim_data.img_gt.shape)
     
     print("Tikhonov...")
     t_start = time.time()
     tik_res = tm.tikhonov_direct(system_matrix, measurements, alpha=0.2)
     execution_times["Tikhonov"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
-    reconstructions["Tikhonov"] = tik_res.reshape((grid_res, grid_res))
+    reconstructions["Tikhonov"] = tik_res.reshape(sim_data.img_gt.shape)
 
     print("LFD (Low First Derivative)...")
     t_start = time.time()
-    reconstructions["LFD"] = tm.lfd(system_matrix, measurements, grid_size=(grid_res, grid_res), alpha=0.07)
+    reconstructions["LFD"] = tm.lfd(system_matrix, measurements, grid_size=sim_data.img_gt.shape, alpha=0.07)
     execution_times["LFD"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     
     print("LTD (Low Third Derivative)...")
     t_start = time.time()
-    reconstructions["LTD"] = tm.ltd(system_matrix, measurements, grid_size=(grid_res, grid_res), alpha=5.0)
+    reconstructions["LTD"] = tm.ltd(system_matrix, measurements, grid_size=sim_data.img_gt.shape, alpha=5.0)
     execution_times["LTD"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     
     # ------- Gas Splatting -------
@@ -79,13 +75,7 @@ def main():
     
     # Measure Setup Time for Gas Splatting
     t_gs_setup_start = time.time()
-    init_pos, init_concentration, init_std, _ = lsqr_initialization(
-        sim_data.beams.tolist(), sim_data.measurements, cfg.sim.map_size, 
-        num_gaussians=cfg.init.initial_gaussians, coarse_res=cfg.init.coarse_res
-    )
-    
-    model = GasSplattingModel(init_pos.shape[0], cfg).to(cfg.device)
-    model.initialize_gaussians(init_pos.to(cfg.device), init_concentration.to(cfg.device), init_std)
+    model, _, _ = setup_gs_model(sim_data, cfg)
     gs_setup_time = time.time() - t_gs_setup_start
     
     # Measure Reconstruction (Training) Time for Gas Splatting
@@ -94,7 +84,7 @@ def main():
     trainer.train(sim_data.beams, sim_data.measurements)
     gs_recon_time = time.time() - t_gs_recon_start
     
-    gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, grid_res=grid_res)
+    gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
     execution_times["Gas Splatting"] = {'setup': gs_setup_time, 'recon': gs_recon_time}
     reconstructions["Gas Splatting"] = gs_img
     

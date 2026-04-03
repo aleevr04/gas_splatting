@@ -261,21 +261,29 @@ def add_measurement_noise(y_true, snr_db=30):
 def generate_simulation_data(cfg: Config) -> SimulationData:
     """Generates gas distribution (ground truth), beams and measurements"""
     
-    if cfg.seed:
-        np.random.seed(cfg.seed)
-
-    map_w, map_h = cfg.sim.map_size
-    grid_w = int(map_w / cfg.sim.cell_size)
-    grid_h = int(map_h / cfg.sim.cell_size)
+    if cfg.sim.seed:
+        np.random.seed(cfg.sim.seed)
 
     # ----- Ground Truth -----
-    print("Generating Ground Truth...")
-    
-    img_gt = generate_gas_distribution(
-        grid_size=(grid_h, grid_w), 
-        num_blobs=cfg.sim.num_blobs, 
-        gauss_filter=not cfg.sim.no_gauss_filter,
-    )
+    if cfg.sim.gt_file:
+        print(f"Loading ground truth from {cfg.sim.gt_file}...")
+        img_gt = np.loadtxt(cfg.sim.gt_file, delimiter=',')
+       
+        rows, cols = img_gt.shape
+        map_w = cols * cfg.sim.cell_size
+        map_h = rows * cfg.sim.cell_size
+        cfg.sim.map_size = (map_w, map_h)
+    else:
+        print("Generating procedural ground truth...")
+        map_w, map_h = cfg.sim.map_size
+        grid_w = int(map_w / cfg.sim.cell_size)
+        grid_h = int(map_h / cfg.sim.cell_size)
+
+        img_gt = generate_gas_distribution(
+            grid_size=(grid_h, grid_w), 
+            num_blobs=cfg.sim.num_blobs, 
+            gauss_filter=not cfg.sim.no_gauss_filter,
+        )
 
     # ------ Beams ------
     print("Generating beams...")

@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import torch
 from scipy.sparse.linalg import lsqr
@@ -17,8 +18,8 @@ def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float]
     """
     
     # Build system matrix
-    coarse_w = int(map_size[0] / coarse_cell_size)
-    coarse_h = int(map_size[1] / coarse_cell_size)
+    coarse_w = math.ceil(map_size[0] / coarse_cell_size)
+    coarse_h = math.ceil(map_size[1] / coarse_cell_size)
     A_sparse = create_system_matrix_sparse((coarse_h, coarse_w), beams, coarse_cell_size)
     
     if isinstance(measurements, torch.Tensor):
@@ -47,6 +48,9 @@ def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float]
         
         x, y = cell2xy((row, col), coarse_cell_size)
         
+        x = min(max(x, 0.0), map_size[0] - 1e-5)
+        y = min(max(y, 0.0), map_size[1] - 1e-5)
+
         val = img_coarse[row, col]
         pos.append([x, y])
         concentration.append(val)
@@ -82,20 +86,27 @@ def setup_gs_model(sim_data: SimulationData, cfg: Config):
             - img_coarse: Visual result of the coarse initialization phase.
     """
 
+    max_dim = max(cfg.sim.map_size[0], cfg.sim.map_size[1])
+    coarse_cell_size = cfg.init.coarse_proportion * max_dim
+
     init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
         sim_data.beams.tolist(), 
         sim_data.measurements, 
         cfg.sim.map_size, 
         num_gaussians=cfg.init.initial_gaussians,
-        coarse_cell_size=cfg.init.coarse_cell_size
+        coarse_cell_size=coarse_cell_size
     )
     initial_gaussians = init_pos.shape[0]
 
-    model = GasSplattingModel(initial_gaussians, cfg).to(cfg.device)
-    model.initialize_gaussians(
-        init_pos.to(cfg.device), 
-        init_concentration.to(cfg.device), 
-        init_std.to(cfg.device)
-    )
+    if initial_gaussians > 0:
+        model = GasSplattingModel(initial_gaussians, cfg).to(cfg.device)
+        model.initialize_gaussians(
+            init_pos.to(cfg.device), 
+            init_concentration.to(cfg.device), 
+            init_std.to(cfg.device)
+        )
+    else:
+        model = GasSplattingModel(1, cfg).to(cfg.device)
+        init_pos = model.get_pos().detach().cpu().numpy()
 
     return model, init_pos, img_coarse

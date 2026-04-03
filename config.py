@@ -7,10 +7,13 @@ from simple_parsing import field
 @dataclass
 class InitParams:
     initial_gaussians: Optional[int] = None
-    coarse_cell_size: float = 2.5
+    coarse_proportion: float = 0.1
 
 @dataclass
 class SimulationParams:
+    seed: Optional[int] = None # Random seed for GT generation
+    gt_file: Optional[str] = None # csv file containing gas distribution data
+
     map_size: Tuple[float, float] = (20.0, 20.0) # (map_width, map_height). Ignored when a csv file is provided
     cell_size: float = 1.0
 
@@ -46,9 +49,6 @@ class Config:
     sim: SimulationParams
     train: TrainParams
     densify: DensificationParams
-
-    # Random seed for GT generation
-    seed: Optional[int] = None
 
     # "cuda" if available, "cpu" otherwise. Can be overwritten
     device_type: str = "cuda" if torch.cuda.is_available() else "cpu"
