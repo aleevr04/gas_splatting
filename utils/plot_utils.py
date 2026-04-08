@@ -1,5 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 from config import Config
 from gs_model import GasSplattingModel
@@ -60,56 +61,82 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
     plt.title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
     plt.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
     plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
-    plt.scatter(init_pos[:,0], init_pos[:,1], c='r', marker='x', label='Peaks')
+    plt.scatter(init_pos[:, 0], init_pos[:, 1], marker='P', c='k', edgecolors='w', s=50, linewidths=1.0, label='Peaks')
     plt.legend()
 
     plt.show()
 
-def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, cfg: Config):
-    """Shows GT, Gas Splatting reconstruction and loss history"""
+def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, densify_history, cfg: Config):
+    """Shows GT, GS reconstruction, loss history, and densification events"""
 
     map_w, map_h = cfg.sim.map_size
     grid_w = int(map_w / cfg.sim.cell_size)
     grid_h = int(map_h / cfg.sim.cell_size)
 
-    fig = plt.figure(figsize=(15, 5))
-    fig.suptitle(f"Initial Gaussians = {gaussians.initial_gaussians}\nFinal Gaussians = {gaussians.num_gaussians}\nBeams = {cfg.sim.num_beams}")
+    fig = plt.figure(figsize=(15, 8)) 
+    
+    # Grid of 3 rows. Images on top, Loss in the middle, Densification below
+    gs = gridspec.GridSpec(3, 3, height_ratios=[1.5, 1, 1], hspace=0.3)
 
-    # 1. GT
-    plt.subplot(2, 3, 1)
-    plt.title(f"Ground Truth (Grid {grid_w}x{grid_h})")
-    plt.imshow(sim_data.img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
+    fig.suptitle(f"Initial Gaussians = {gaussians.initial_gaussians}  |  Final = {gaussians.num_gaussians}  |  Beams = {cfg.sim.num_beams}")
 
-    for i in range(0, len(sim_data.beams)):
+    # 1. GT (Top Left)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax1.set_title(f"Ground Truth ({grid_w}x{grid_h})")
+    im1 = ax1.imshow(sim_data.img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
+    for i in range(len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
-        plt.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
-    plt.colorbar(label="ppm")
+        ax1.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
+    fig.colorbar(im1, ax=ax1, label="ppm", fraction=0.046, pad=0.04)
 
-    # 2. Reconstruction
-    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=0.1)
+    # 2. Reconstruction (Top Center)
+    ax2 = fig.add_subplot(gs[0, 1])
+    max_map_dim = max(map_w, map_h)
+    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=max_map_dim / 100)
     pos = gaussians.get_pos().detach().cpu().numpy()
+    ax2.set_title("GS Reconstruction")
+    im2 = ax2.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', interpolation='bilinear')
+    ax2.scatter(pos[:, 0], pos[:, 1], marker='P', c='k', edgecolors='w', s=30, linewidths=1.0)
+    fig.colorbar(im2, ax=ax2, label="ppm", fraction=0.046, pad=0.04)
 
-    plt.subplot(2, 3, 2)
-    plt.title(f"GS Reconstruction")
-    plt.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
-    plt.colorbar(label="ppm")
-    plt.scatter(pos[:, 0], pos[:, 1], c='r', s=10, marker='x', alpha=0.5)
-
+    # 3. Reconstruction Grid (Top Righ)
+    ax3 = fig.add_subplot(gs[0, 2])
     img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+    ax3.set_title("GS Reconstruction (Grid)")
+    im3 = ax3.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
+    fig.colorbar(im3, ax=ax3, label="ppm", fraction=0.046, pad=0.04)
 
-    plt.subplot(2, 3, 3)
-    plt.title(f"GS Reconstruction (Grid)")
-    plt.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
-    plt.colorbar(label="ppm")
+    # 4. Loss History (Middle Row)
+    ax4 = fig.add_subplot(gs[1, :])
+    ax4.set_title("Loss History")
+    ax4.plot(loss_history, color='blue', alpha=0.8)
+    ax4.set_ylabel("Total Loss")
+    ax4.set_yscale('log')
+    ax4.set_xlim(0, len(loss_history))
+    ax4.grid(True, which="both", ls="--", alpha=0.3)
+    ax4.tick_params(labelbottom=False) # Ocultamos los números de X para que no rocen con el gráfico de abajo
 
-    # 3. Loss History
-    plt.subplot(2, 1, 2)
-    plt.title("Loss History")
-    plt.plot(loss_history)
-    plt.xlabel("Iteration")
-    plt.ylabel("Total Loss")
-    plt.yscale('log')
-    plt.grid(True, which="both", ls="-", alpha=0.3)
+    # 5. Densification Events (Bottom Row)
+    ax5 = fig.add_subplot(gs[2, :], sharex=ax4)
+    ax5.set_title("Densification Events")
+    ax5.set_xlabel("Iteration")
+    ax5.set_ylabel("Count")
 
-    plt.tight_layout()
+    # Extract densification stats
+    iters = list(densify_history.keys())
+    clones = [d['clones'] for d in densify_history.values()]
+    splits = [d['splits'] for d in densify_history.values()]
+    prunes = [d['prunes'] for d in densify_history.values()]
+
+    # Stacked bars
+    bar_width = cfg.densify.densify_interval * 0.4 
+    ax5.bar(iters, clones, width=bar_width, label='Clones', color='skyblue')
+    ax5.bar(iters, splits, width=bar_width, bottom=clones, label='Splits', color='orange')
+    
+    bottom_prunes = [c + s for c, s in zip(clones, splits)]
+    ax5.bar(iters, prunes, width=bar_width, bottom=bottom_prunes, label='Prunes', color='red')
+
+    ax5.legend(loc='upper right')
+    ax5.grid(True, axis='y', ls="--", alpha=0.3)
+
     plt.show()

@@ -15,6 +15,7 @@ class GasSplattingModel(nn.Module):
         super().__init__()
         self.initial_gaussians = initial_gaussians
         self.num_gaussians = initial_gaussians
+
         self.map_size = torch.tensor(cfg.sim.map_size, device=cfg.device)
         self.densify_cfg = cfg.densify
 
@@ -262,28 +263,32 @@ class GasSplattingModel(nn.Module):
         grad_mask = grads > self.densify_cfg.gradient_threshold
 
         # Gaussians with small scale
-        small_scale_mask = torch.max(self.get_scale(), dim=1).values < self.densify_cfg.scale_threshold
+        adjusted_scales = self.get_scale() / torch.max(self.map_size)
+        small_scale_mask = torch.max(adjusted_scales, dim=1).values < self.densify_cfg.scale_threshold
 
         # --- Clone ---
         clone_mask = torch.logical_and(grad_mask, small_scale_mask)
+        num_clones = int(clone_mask.sum().item())
         self.clone(optimizer, clone_mask)
-        self.clones += clone_mask.sum()
+        self.clones += num_clones
 
         # --- Split ---
         split_mask = torch.logical_and(grad_mask, ~small_scale_mask)
 
         # Number of gaussians may have changed
-        num_cloned = int(clone_mask.sum().item())
-        if num_cloned > 0:
-            padding = torch.zeros(num_cloned, dtype=torch.bool, device=split_mask.device)
+        if num_clones > 0:
+            padding = torch.zeros(num_clones, dtype=torch.bool, device=split_mask.device)
             split_mask = torch.cat([split_mask, padding])
 
+        num_splits = int(split_mask.sum().item())
         self.split(optimizer, split_mask)
-        self.splits += split_mask.sum()
+        self.splits += num_splits
 
         # --- Prune ---
+        num_prunes = 0
         if self.num_gaussians > 1:
             prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
+            num_prunes = int(prune_mask.sum().item())
             self.prune(optimizer, prune_mask)
 
         # Update current gaussians count
@@ -293,9 +298,13 @@ class GasSplattingModel(nn.Module):
         self.pos_grad_accum = torch.zeros((self.num_gaussians, 1), device=self._pos.device)
         self.denom = torch.zeros((self.num_gaussians, 1), device=self._pos.device)
 
-    def update_accum_gradient(self):
-        grad_norm = torch.linalg.vector_norm(self._pos.grad, dim=-1, keepdim=True)
-        mask = grad_norm > 1e-6
+        return {'splits': num_splits, 'clones': num_clones, 'prunes': num_prunes}
 
-        self.pos_grad_accum[mask] += grad_norm[mask]
-        self.denom[mask] += 1
+    def update_accum_gradient(self):
+        if self._pos.grad is not None:
+            adjusted_grads = self._pos.grad / self.map_size
+            grad_norm = torch.linalg.vector_norm(adjusted_grads, dim=-1, keepdim=True)
+            mask = grad_norm > 1e-6
+
+            self.pos_grad_accum[mask] += grad_norm[mask]
+            self.denom[mask] += 1

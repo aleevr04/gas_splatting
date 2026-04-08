@@ -138,6 +138,7 @@ class Trainer:
 
     def train(self, beams, y_true):
         loss_history = []
+        densify_history = {}
         pbar = tqdm(range(self.train_cfg.iterations), desc="Training", dynamic_ncols=True)
         
         for it in pbar:
@@ -173,8 +174,9 @@ class Trainer:
             # Densification
             if self.is_densify_it(it):
                 with torch.no_grad():
-                    self.model.densify_and_prune(self.optimizer)
-                    
+                    stats = self.model.densify_and_prune(self.optimizer)
+                    densify_history[it] = stats
+
                     # Forzamos un refresco justo después de densificar para ver el cambio instantáneo
                     if self.visualizer:
                         self.visualizer.update(
@@ -196,4 +198,4 @@ class Trainer:
         if self.visualizer:
             plt.ioff()
 
-        return loss_history
+        return loss_history, densify_history
