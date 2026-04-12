@@ -15,8 +15,6 @@ from utils.init_utils import setup_gs_model
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import render_gaussian_map
 
-def nmse_loss(measurements, y_pred):
-    return np.sum((y_pred - measurements)**2) / (np.sum(measurements**2) + 1e-8)
 
 def main():
     # Configuration
@@ -94,22 +92,25 @@ def main():
     gt_img = sim_data.img_gt
     num_methods = len(reconstructions)
 
+    all_imgs = [gt_img] + list(reconstructions.values())
+    vmin_global = 0
+    vmax_global = max(img.max() for img in all_imgs)
+
     # --- FIGURE 1: RECONSTRUCTIONS ---
-    fig, axes = plt.subplots(2, (num_methods + 2) // 2, figsize=(16, 8))
+    fig, axes = plt.subplots(2, (num_methods + 2) // 2, figsize=(16, 10))
     axes = axes.flatten()
     
     # GT
-    im_gt = axes[0].imshow(gt_img, origin='lower', extent=extent, cmap='jet')
+    im_gt = axes[0].imshow(gt_img, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
     axes[0].set_title("Ground Truth", fontsize=14)
     axes[0].axis('off')
     for i in range(0, len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
         axes[0].plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
-    fig.colorbar(im_gt, ax=axes[0])
     
     # Plot reconstructions
     for idx, (name, img) in enumerate(reconstructions.items(), start=1):
-        nmse = nmse_loss(gt_img, img)
+        rmse = np.sqrt(np.mean((img - gt_img)**2))
         data_range = gt_img.max() - gt_img.min()
         ssim_val = ssim(gt_img, img, data_range=data_range)
         
@@ -117,18 +118,17 @@ def main():
         t_recon = execution_times[name]['recon']
 
         # Multi-line title for clarity
-        title = f"{name}\nNMSE: {nmse:.4f} | SSIM: {ssim_val:.4f}\nSetup: {t_setup:.2f}s | Recon: {t_recon:.2f}s"
-        print(f"{name:<20}: NMSE = {nmse:.4f} | SSIM = {ssim_val:.4f} | Setup = {t_setup:.2f}s | Recon = {t_recon:.2f}s")
+        title = f"{name}\nRMSE: {rmse:.4f} | SSIM: {ssim_val:.4f}\nSetup: {t_setup:.2f}s | Recon: {t_recon:.2f}s"
+        print(f"{name:<20}: RMSE = {rmse:.4f} | SSIM = {ssim_val:.4f} | Setup = {t_setup:.2f}s | Recon = {t_recon:.2f}s")
             
-        im = axes[idx].imshow(img, origin='lower', extent=extent, cmap='jet')
-        axes[idx].set_title(title, fontsize=14)
+        axes[idx].imshow(img, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
+        axes[idx].set_title(title, fontsize=12)
         axes[idx].axis('off')
-        fig.colorbar(im, ax=axes[idx])
         
     for i in range(idx + 1, len(axes)):
         axes[i].axis('off')
-        
-    plt.tight_layout()
+
+    fig.colorbar(im_gt, ax=axes.tolist(), label="ppm", fraction=0.03, pad=0.05)
     
     # Save reconstructions plot
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods.png')
@@ -157,13 +157,12 @@ def main():
         im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='hot', vmin=0, vmax=global_max_err)
         axes_err[idx].set_title(f"{name} Error", fontsize=14)
         axes_err[idx].axis('off')
-        fig_err.colorbar(im_err, ax=axes_err[idx])
 
     # Hide any unused subplots
     for i in range(len(error_maps), len(axes_err)):
         axes_err[i].axis('off')
 
-    plt.tight_layout()
+    fig_err.colorbar(im_err, ax=axes_err.tolist(), label="Absolute Error (ppm)", fraction=0.03, pad=0.05)
     
     # Save error maps plot
     save_path_err = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods_errors.png')

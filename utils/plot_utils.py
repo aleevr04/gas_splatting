@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
@@ -50,19 +51,22 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
 
     map_w, map_h = cfg.sim.map_size
 
-    plt.figure(figsize=(12, 5))
+    vmin = 0
+    vmax = max(img_gt.max(), img_coarse.max())
 
-    plt.subplot(1, 2, 1)
-    plt.title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
-    plt.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
-    plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
+    fig = plt.figure(figsize=(12, 5))
 
-    plt.subplot(1, 2, 2)
-    plt.title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
-    plt.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
-    plt.colorbar(label="ppm", fraction=0.046, pad=0.04)
-    plt.scatter(init_pos[:, 0], init_pos[:, 1], marker='P', c='k', edgecolors='w', s=50, linewidths=1.0, label='Peaks')
-    plt.legend()
+    ax1 = plt.subplot(1, 2, 1)
+    ax1.set_title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
+    im1 = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+
+    ax2 = plt.subplot(1, 2, 2)
+    ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
+    ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+    ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=50, linewidths=1.2, label='Peaks')
+    ax2.legend()
+
+    fig.colorbar(im1, ax=[ax1, ax2], label="ppm", fraction=0.025, pad=0.05)
 
     plt.show()
 
@@ -72,6 +76,19 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     map_w, map_h = cfg.sim.map_size
     grid_w = int(map_w / cfg.sim.cell_size)
     grid_h = int(map_h / cfg.sim.cell_size)
+    max_map_dim = max(map_w, map_h)
+
+    # Generate images
+    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=max_map_dim / 100)
+    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+    
+    # Colormap min and max values
+    vmin = 0
+    vmax = max(sim_data.img_gt.max(), img_pred.max())
+
+    # RMSE
+    mse = np.mean((img_pred - sim_data.img_gt)**2)
+    rmse = np.sqrt(mse)
 
     fig = plt.figure(figsize=(15, 8)) 
     
@@ -83,32 +100,29 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     # 1. GT (Top Left)
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_title(f"Ground Truth ({grid_w}x{grid_h})")
-    im1 = ax1.imshow(sim_data.img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
+    im1 = ax1.imshow(sim_data.img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
     for i in range(len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
         ax1.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
-    fig.colorbar(im1, ax=ax1, label="ppm", fraction=0.046, pad=0.04)
 
     # 2. Reconstruction (Top Center)
     ax2 = fig.add_subplot(gs[0, 1])
-    max_map_dim = max(map_w, map_h)
-    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=max_map_dim / 100)
     pos = gaussians.get_pos().detach().cpu().numpy()
     ax2.set_title("GS Reconstruction")
-    im2 = ax2.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', interpolation='bilinear')
+    ax2.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax, interpolation='bilinear')
     ax2.scatter(pos[:, 0], pos[:, 1], marker='P', c='k', edgecolors='w', s=30, linewidths=1.0)
-    fig.colorbar(im2, ax=ax2, label="ppm", fraction=0.046, pad=0.04)
 
     # 3. Reconstruction Grid (Top Righ)
     ax3 = fig.add_subplot(gs[0, 2])
-    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
-    ax3.set_title("GS Reconstruction (Grid)")
-    im3 = ax3.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
-    fig.colorbar(im3, ax=ax3, label="ppm", fraction=0.046, pad=0.04)
+    ax3.set_title(f"GS Reconstruction (Grid)\nRMSE = {rmse:.4f}")
+    ax3.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+
+    # Single Colorbar
+    fig.colorbar(im1, ax=[ax1, ax2, ax3], label="ppm", fraction=0.015, pad=0.02)
 
     # 4. Loss History (Middle Row)
     ax4 = fig.add_subplot(gs[1, :])
-    ax4.set_title("Loss History")
+    ax4.set_title(f"Loss History (Final Loss = {loss_history[-1]:.4f})")
     ax4.plot(loss_history, color='blue', alpha=0.8)
     ax4.set_ylabel("Total Loss")
     ax4.set_yscale('log')
