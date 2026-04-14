@@ -10,14 +10,13 @@ from simple_parsing import ArgumentParser
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
-from gs_model import GasSplattingModel
 from trainer import Trainer
-from utils.init_utils import lsqr_initialization
+from utils.init_utils import setup_gs_model
 from utils.sim_utils import generate_simulation_data
 from utils.plot_utils import render_gaussian_map
 
-def nmse_loss(y_true, y_pred):
-    return np.sum((y_pred - y_true)**2) / (np.sum(y_true**2) + 1e-8)
+def rmse_loss(img_gt, img_pred):
+    return np.sqrt(np.mean((img_pred - img_gt)**2))
 
 def main():
     # --- Experiment settings ---
@@ -27,8 +26,8 @@ def main():
     parser = ArgumentParser()
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
-    base_cfg = args.cfg
-    base_cfg.train.no_live_vis = True
+    cfg = args.cfg
+    cfg.train.no_live_vis = True
 
     # Dictionaries for error and time results
     results_nmse = {it: [] for it in iteration_list}
@@ -37,16 +36,19 @@ def main():
     print(f"Starting experiment: {len(iteration_list)} diferent iterations x {len(seeds)} seeds.")
 
     # --- Main Loop ---
-    for iters in iteration_list:
-        print(f"\n=========================================")
-        print(f" Evaluating {iters} Iterations")
-        print(f"=========================================")
+    for seed in seeds:
+        print(f" -> Seed: {seed}...", flush=True)
+        cfg.seed = seed
+        
+        # Simulation data (generated once for each seed)
+        sim_data = generate_simulation_data(cfg)
+        gt_img = sim_data.img_gt
 
-        for seed in seeds:
-            print(f" -> Seed: {seed}...", end=" ", flush=True)
+        for iters in iteration_list:
+            print(f"\n=========================================")
+            print(f" Evaluating {iters} Iterations")
+            print(f"=========================================")
             
-            cfg = copy.deepcopy(base_cfg)
-            cfg.seed = seed
             cfg.train.iterations = iters
             
             # Adapt densify parameters according to current number of iterations
@@ -54,34 +56,21 @@ def main():
             cfg.densify.densify_until = int(iters * (1500 / 3000))
             cfg.densify.densify_interval = int(iters * (100 / 3000))
 
-            # Simulation data
-            sim_data = generate_simulation_data(cfg)
-            gt_img = sim_data.img_gt
-            grid_res = gt_img.shape[0]
-
-            # Initialization
-            init_pos, init_concentration, init_std, _ = lsqr_initialization(
-                sim_data.beams.tolist(), sim_data.measurements, cfg.sim.map_size, 
-                num_gaussians=cfg.init.initial_gaussians, coarse_res=cfg.init.coarse_res
-            )
-            
-            model = GasSplattingModel(init_pos.shape[0], cfg).to(cfg.device)
-            model.initialize_gaussians(init_pos.to(cfg.device), init_concentration.to(cfg.device), init_std)
-            
-            # Train
+            # Initialization + Training
             t_start = time.time()
+            model, _, _ = setup_gs_model(sim_data, cfg)
             trainer = Trainer(model, cfg)
             trainer.train(sim_data.beams, sim_data.measurements)
             train_time = time.time() - t_start
 
             # Evaluation
-            gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, grid_res=grid_res)
-            nmse = nmse_loss(gt_img, gs_img)
+            gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+            rmse = rmse_loss(gt_img, gs_img)
 
-            results_nmse[iters].append(nmse)
+            results_nmse[iters].append(rmse)
             results_time[iters].append(train_time)
             
-            print(f"NMSE: {nmse:.4f} | Time: {train_time:.1f}s")
+            print(f"RMSE: {rmse:.4f} | Time: {train_time:.1f}s")
 
     # --- Visualization ---
     print("\nGenerating plot...")
@@ -96,7 +85,7 @@ def plot_results(iteration_list, results_nmse, results_time):
     fig, ax = plt.subplots(figsize=(10, 6))
     
     # Draw means
-    ax.plot(iteration_list, nmse_means, 'b-o', linewidth=2, label='NMSE Mean')
+    ax.plot(iteration_list, nmse_means, 'b-o', linewidth=2, label='RMSE Mean')
     
     # Draw standard deviation
     ax.fill_between(iteration_list, 
@@ -104,9 +93,9 @@ def plot_results(iteration_list, results_nmse, results_time):
                     np.array(nmse_means) + np.array(nmse_stds), 
                     color='blue', alpha=0.2, label='Standard Deviation')
 
-    ax.set_title("Error (NMSE) vs Number of Iterations")
+    ax.set_title("Error (RMSE) vs Number of Iterations")
     ax.set_xlabel("Training Iterations")
-    ax.set_ylabel("Normalized Mean Square Error (NMSE)")
+    ax.set_ylabel("Root Mean Square Error (RMSE)")
     ax.grid(True, linestyle='--', alpha=0.7)
     ax.legend()
 

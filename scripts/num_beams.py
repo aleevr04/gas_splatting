@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from simple_parsing import ArgumentParser
@@ -10,14 +9,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import utils.tomo_utils as tm
 from config import Config
-from gs_model import GasSplattingModel
 from trainer import Trainer
-from utils.init_utils import lsqr_initialization
+from utils.sim_utils import SimulationData
+from utils.init_utils import setup_gs_model
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import render_gaussian_map
 
-def nmse_loss(measurements, y_pred):
-    return np.sum((y_pred - measurements)**2) / (np.sum(measurements**2) + 1e-8)
+def rmse_loss(img_gt, img_pred):
+    return np.sqrt(np.mean((img_pred - img_gt)**2))
 
 def main():
     # --- Configuration ---
@@ -27,14 +26,17 @@ def main():
     
     methods = ["ART", "Tikhonov", "LFD", "LTD", "Gas Splatting"]
     
-    results_nmse = {m: {b: [] for b in num_beams_list} for m in methods}
+    results_rmse = {m: {b: [] for b in num_beams_list} for m in methods}
     results_time = {m: {b: [] for b in num_beams_list} for m in methods}
 
     parser = ArgumentParser(description="Compare methods results when the number of beams changes")
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
-    base_cfg = args.cfg
-    base_cfg.train.no_live_vis = True
+    cfg = args.cfg
+    cfg.train.no_live_vis = True
+
+    # We generate all beams and then we select the amount of beams we want to test
+    cfg.sim.num_beams = num_beams_list[-1]
 
     # Deactivate tomo methods progress bar
     tm.tqdm = lambda x, **kwargs: x
@@ -42,68 +44,69 @@ def main():
     print(f"Starting experiment: {len(num_beams_list)} beam configurations x {len(seeds)} seeds.")
 
     # --- Main loop ---
-    for n_beams in num_beams_list:
-        print(f"\n=========================================")
-        print(f" Evaluating {n_beams} Beams")
-        print(f"=========================================")
+    for seed in seeds:
+        print(f" -> Seed: {seed}...", flush=True)
+        cfg.sim.seed = seed
+        
+        # Simulation data only changes when using other seed
+        # so we only generate it once for each seed
+        base_sim_data = generate_simulation_data(cfg)
+        gt_img = base_sim_data.img_gt
+        
+        for n_beams in num_beams_list:
+            print(f"\n=========================================")
+            print(f" Evaluating {n_beams} Beams")
+            print(f"=========================================")  
 
-        for seed in seeds:
-            print(f" -> Seed: {seed}...", flush=True)
-            
-            # Configure seed and number of beams
-            cfg = copy.deepcopy(base_cfg)
-            cfg.seed = seed
-            cfg.sim.num_beams = n_beams
-            res = cfg.sim.grid_res # Grid resolution stays constant
-            
-            # Simulation data
-            sim_data = generate_simulation_data(cfg)
+            sim_data = SimulationData(
+                beams=base_sim_data.beams[:n_beams],
+                measurements=base_sim_data.measurements[:n_beams],
+                y_true=base_sim_data.y_true[:n_beams],
+                img_gt=gt_img
+            )
             measurements = sim_data.measurements.cpu().numpy()
-            gt_img = sim_data.img_gt
-            cell_size = cfg.sim.map_size / res
-            
+
+            grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
+            grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+            grid_size = (grid_w, grid_h)
+
             # -----------------------------------------------------------
-            #        TRADITIONAL METHODS SETUP
+            #        TRADITIONAL METHODS
             # -----------------------------------------------------------
             t_setup_start = time.time()
-            system_matrix = create_system_matrix_sparse((res, res), sim_data.beams.tolist(), cell_size).tocsr()
+            system_matrix = create_system_matrix_sparse(grid_size, sim_data.beams.tolist(), cfg.sim.cell_size).tocsr()
             trad_setup_time = time.time() - t_setup_start
             
             # --- ART ---
             t0 = time.time()
-            art_res = tm.art(system_matrix, measurements, num_iterations=500, relaxation_factor=0.1)
+            art_res = tm.art(system_matrix, measurements, num_iterations=400, relaxation_factor=1.6)
             results_time["ART"][n_beams].append(trad_setup_time + (time.time() - t0))
-            results_nmse["ART"][n_beams].append(nmse_loss(gt_img, art_res.reshape((res, res))))
+            results_rmse["ART"][n_beams].append(rmse_loss(gt_img, art_res.reshape(grid_size)))
             
             # --- Tikhonov (Direct) ---
             t0 = time.time()
-            tik_res = tm.tikhonov_direct(system_matrix, measurements, alpha=0.1)
+            tik_res = tm.tikhonov_direct(system_matrix, measurements, alpha=0.2)
             results_time["Tikhonov"][n_beams].append(trad_setup_time + (time.time() - t0))
-            results_nmse["Tikhonov"][n_beams].append(nmse_loss(gt_img, tik_res.reshape((res, res))))
+            results_rmse["Tikhonov"][n_beams].append(rmse_loss(gt_img, tik_res.reshape(grid_size)))
             
             # --- LFD ---
             t0 = time.time()
-            lfd_res = tm.lfd(system_matrix, measurements, grid_size=(res, res), alpha=0.05)
+            lfd_res = tm.lfd(system_matrix, measurements, grid_size=grid_size, alpha=0.07)
             results_time["LFD"][n_beams].append(trad_setup_time + (time.time() - t0))
-            results_nmse["LFD"][n_beams].append(nmse_loss(gt_img, lfd_res))
+            results_rmse["LFD"][n_beams].append(rmse_loss(gt_img, lfd_res))
             
             # --- LTD ---
             t0 = time.time()
-            ltd_res = tm.ltd(system_matrix, measurements, grid_size=(res, res), alpha=0.01)
+            ltd_res = tm.ltd(system_matrix, measurements, grid_size=grid_size, alpha=5.0)
             results_time["LTD"][n_beams].append(trad_setup_time + (time.time() - t0))
-            results_nmse["LTD"][n_beams].append(nmse_loss(gt_img, ltd_res))
+            results_rmse["LTD"][n_beams].append(rmse_loss(gt_img, ltd_res))
 
             # -----------------------------------------------------------
             #        GAS SPLATTING
             # -----------------------------------------------------------
             # Setup (LSQR Initialization + Model)
             t_gs_setup = time.time()
-            init_pos, init_concentration, init_std, _ = lsqr_initialization(
-                sim_data.beams.tolist(), sim_data.measurements, cfg.sim.map_size, 
-                num_gaussians=cfg.init.initial_gaussians, coarse_res=cfg.init.coarse_res
-            )
-            model = GasSplattingModel(init_pos.shape[0], cfg).to(cfg.device)
-            model.initialize_gaussians(init_pos.to(cfg.device), init_concentration.to(cfg.device), init_std)
+            model, _, _ = setup_gs_model(sim_data, cfg)
             gs_setup_time = time.time() - t_gs_setup
             
             # Training
@@ -115,14 +118,14 @@ def main():
             results_time["Gas Splatting"][n_beams].append(gs_setup_time + gs_train_time)
             
             # Evaluation
-            gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, grid_res=res)
-            results_nmse["Gas Splatting"][n_beams].append(nmse_loss(gt_img, gs_img))
+            gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+            results_rmse["Gas Splatting"][n_beams].append(rmse_loss(gt_img, gs_img))
 
-    # --- Graphs ---
-    print("\nGenerating graphs...")
-    plot_results(num_beams_list, methods, results_nmse, results_time)
+    # --- Plots ---
+    print("\nGenerating plots...")
+    plot_results(num_beams_list, methods, results_rmse, results_time)
 
-def plot_results(num_beams_list, methods, results_nmse, results_time):
+def plot_results(num_beams_list, methods, results_rmse, results_time):
     plt.rcParams.update({'font.size': 12})
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
@@ -137,22 +140,22 @@ def plot_results(num_beams_list, methods, results_nmse, results_time):
     for method in methods:
         style = styles[method]
         
-        # Means and std deviations for nmse
-        nmse_means = [np.mean(results_nmse[method][b]) for b in num_beams_list]
-        nmse_stds  = [np.std(results_nmse[method][b]) for b in num_beams_list]
+        # Means and std deviations for rmse
+        rmse_means = [np.mean(results_rmse[method][b]) for b in num_beams_list]
+        rmse_stds  = [np.std(results_rmse[method][b]) for b in num_beams_list]
         
         # Means and std deviations for time
         time_means = [np.mean(results_time[method][b]) for b in num_beams_list]
         time_stds  = [np.std(results_time[method][b]) for b in num_beams_list]
 
         # Error
-        ax1.plot(num_beams_list, nmse_means, label=method, 
+        ax1.plot(num_beams_list, rmse_means, label=method, 
                  color=style["color"], marker=style["marker"], 
                  linewidth=style.get("linewidth", 1.5), 
                  markersize=style.get("markersize", 6))
         ax1.fill_between(num_beams_list, 
-                         np.array(nmse_means) - np.array(nmse_stds), 
-                         np.array(nmse_means) + np.array(nmse_stds), 
+                         np.array(rmse_means) - np.array(rmse_stds), 
+                         np.array(rmse_means) + np.array(rmse_stds), 
                          color=style["color"], alpha=0.15)
 
         # Time
@@ -166,9 +169,9 @@ def plot_results(num_beams_list, methods, results_nmse, results_time):
                          color=style["color"], alpha=0.15)
 
     # Error graph details
-    ax1.set_title("NMSE Evolution", pad=15)
+    ax1.set_title("RMSE Evolution", pad=15)
     ax1.set_xlabel("Number of Beams")
-    ax1.set_ylabel("NMSE vs Ground Truth")
+    ax1.set_ylabel("RMSE vs Ground Truth")
     ax1.set_xticks(num_beams_list)
     ax1.grid(True, linestyle='--', alpha=0.7)
     ax1.legend()
