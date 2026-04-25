@@ -13,6 +13,7 @@ class InitParams:
 class SimulationParams:
     seed: Optional[int] = None # Random seed for GT generation
     gt_file: Optional[str] = None # csv file containing gas distribution data
+    obstacles_file: Optional[str] = None # csv file containing occupancy grid data 
 
     map_size: Tuple[float, float] = (20.0, 20.0) # (map_width, map_height). Ignored when a csv file is provided
     cell_size: float = 1.0
