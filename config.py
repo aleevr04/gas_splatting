@@ -42,6 +42,7 @@ class DensificationParams:
     densify_from: int = 100
     densify_until: int = 750
     densify_interval: int = 50
+    long_axis_split: bool = field(default=False, action="store_true")
 
 @dataclass
 class Config:
