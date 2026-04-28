@@ -35,11 +35,14 @@ def main():
         test_cfg = copy.deepcopy(base_cfg)
         test_cfg.densify.long_axis_split = (method == "Long-Axis Split")
         
+        # Enable mid-training evaluation
+        test_cfg.train.do_eval = True
+        test_cfg.train.eval_interval = 25
+        
         model, _, _ = setup_gs_model(sim_data, test_cfg)
         trainer = Trainer(model, test_cfg)
         
-        # trainer.train returns loss_history, densify_history
-        loss_history, densify_history = trainer.train(sim_data.beams, sim_data.measurements)
+        train_results = trainer.train(sim_data)
         
         # Render the final 2D image
         gs_img = render_gaussian_map(model, test_cfg.sim.map_size, test_cfg.device, cell_size=test_cfg.sim.cell_size)
@@ -47,8 +50,9 @@ def main():
         
         # Store all relevant data
         results[method] = {
-            "loss": loss_history,
-            "densify": densify_history,
+            "loss": train_results.loss_history,
+            "densify": train_results.densify_history,
+            "rmse_history": train_results.rmse_history,
             "img": gs_img,
             "rmse": rmse,
             "num_gaussians": model.num_gaussians
@@ -60,10 +64,6 @@ def main():
     plt.rcParams.update({'font.size': 11})
     fig = plt.figure(figsize=(16, 12))
     
-    # Create a 3x6 grid. 
-    # Row 0: 3 Images (2 columns each)
-    # Row 1: 1 Loss plot (all 6 columns)
-    # Row 2: 2 Densification plots (3 columns each)
     gs = gridspec.GridSpec(3, 6, height_ratios=[1.2, 1, 1.2], hspace=0.4, wspace=0.3)
     
     map_w, map_h = base_cfg.sim.map_size
@@ -71,7 +71,10 @@ def main():
     vmin = 0
     vmax = max(gt_img.max(), results["Original Split"]["img"].max(), results["Long-Axis Split"]["img"].max())
     
-    # --- Row 1: Images ---
+    # ==========================================
+    # --- Row 0: Images ---
+    # ==========================================
+    
     # GT
     ax_gt = fig.add_subplot(gs[0, 0:2])
     ax_gt.set_title("Ground Truth")
@@ -93,16 +96,24 @@ def main():
     
     fig.colorbar(im_gt, ax=[ax_gt, ax_orig, ax_long], label="ppm", fraction=0.015, pad=0.02)
     
-    # --- Row 2: Loss ---
-    ax_loss = fig.add_subplot(gs[1, :])
-    ax_loss.plot(results["Original Split"]["loss"], label="Original Split", color="tab:orange", alpha=0.8, linewidth=1.5)
-    ax_loss.plot(results["Long-Axis Split"]["loss"], label="Long-Axis Split", color="tab:blue", alpha=0.8, linewidth=1.5)
+    # ==========================================
+    # --- Row 1: Loss & Spatial RMSE ---
+    # ==========================================
     
     d_from = base_cfg.densify.densify_from
     d_until = base_cfg.densify.densify_until
     d_interval = base_cfg.densify.densify_interval
-    
     densify_iters = list(range(d_from, d_until + 1, d_interval))
+    
+    # FIX: Set the window to show the entire training process
+    window_start = 0
+    window_end = base_cfg.train.iterations
+    
+    # 1. Loss Plot (Left Side)
+    ax_loss = fig.add_subplot(gs[1, 0:3])
+    ax_loss.plot(results["Original Split"]["loss"], label="Original Split", color="tab:orange", alpha=0.8, linewidth=1.5)
+    ax_loss.plot(results["Long-Axis Split"]["loss"], label="Long-Axis Split", color="tab:blue", alpha=0.8, linewidth=1.5)
+    
     for i, d_iter in enumerate(densify_iters):
         label = "Densification Event" if i == 0 else None
         ax_loss.axvline(x=d_iter, color='gray', linestyle='--', alpha=0.5, label=label)
@@ -111,20 +122,44 @@ def main():
     ax_loss.set_xlabel("Iterations")
     ax_loss.set_ylabel("Total Loss (Log Scale)")
     ax_loss.set_yscale('log')
-    
-    window_start = max(0, d_from - 50)
-    window_end = min(base_cfg.train.iterations, d_until + 150)
     ax_loss.set_xlim(window_start, window_end)
     ax_loss.grid(True, which="both", linestyle='--', alpha=0.3)
     ax_loss.legend(loc='upper right')
     
-    # --- Row 3: Densification Stats ---
+    # 2. RMSE Plot (Right Side)
+    ax_rmse = fig.add_subplot(gs[1, 3:6], sharex=ax_loss)
+    
+    # Extract Orig Data
+    iters_orig = list(results["Original Split"]["rmse_history"].keys())
+    rmse_orig_vals = list(results["Original Split"]["rmse_history"].values())
+    ax_rmse.plot(iters_orig, rmse_orig_vals, label="Original Split", color="tab:orange", alpha=0.8, linewidth=1.5)
+    
+    # Extract Long-Axis Data
+    iters_long = list(results["Long-Axis Split"]["rmse_history"].keys())
+    rmse_long_vals = list(results["Long-Axis Split"]["rmse_history"].values())
+    ax_rmse.plot(iters_long, rmse_long_vals, label="Long-Axis Split", color="tab:blue", alpha=0.8, linewidth=1.5)
+    
+    for i, d_iter in enumerate(densify_iters):
+        ax_rmse.axvline(x=d_iter, color='gray', linestyle='--', alpha=0.5)
+
+    ax_rmse.set_title("Spatial Error (RMSE) vs Ground Truth")
+    ax_rmse.set_xlabel("Iterations")
+    ax_rmse.set_ylabel("RMSE (ppm)")
+    ax_rmse.grid(True, which="both", linestyle='--', alpha=0.3)
+    ax_rmse.legend(loc='upper right')
+    
+    # ==========================================
+    # --- Row 2: Densification Stats ---
+    # ==========================================
+    
     bar_width = d_interval * 0.4
     
     def plot_densify_stats(ax, densify_history, title):
         if not densify_history:
             ax.set_title(title + " (No Densification)")
+            ax.set_xlim(window_start, window_end)
             return
+            
         iters = list(densify_history.keys())
         clones = [d['clones'] for d in densify_history.values()]
         splits = [d['splits'] for d in densify_history.values()]
@@ -149,7 +184,7 @@ def main():
     plot_densify_stats(ax_dens_long, results["Long-Axis Split"]["densify"], "Densification Stats: Long-Axis Split")
 
     # Save and show
-    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_loss_peaks_and_recon.png')
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_loss_peaks.png')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300)
     print(f"Plot saved in: {save_path}")

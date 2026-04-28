@@ -33,7 +33,6 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg = args.cfg
-    cfg.train.no_live_vis = True
 
     # We generate all beams and then we select the amount of beams we want to test
     cfg.sim.num_beams = num_beams_list[-1]
@@ -112,7 +111,7 @@ def main():
             # Training
             t_gs_train = time.time()
             trainer = Trainer(model, cfg)
-            trainer.train(sim_data.beams, sim_data.measurements)
+            trainer.train(sim_data)
             gs_train_time = time.time() - t_gs_train
             
             results_time["Gas Splatting"][n_beams].append(gs_setup_time + gs_train_time)

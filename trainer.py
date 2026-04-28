@@ -4,9 +4,19 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+from dataclasses import dataclass, field
+from typing import List, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
+from utils.sim_utils import SimulationData
+
+
+@dataclass
+class TrainingResults:
+    loss_history: List[float] = field(default_factory=list)
+    densify_history: Dict[int, dict] = field(default_factory=dict)
+    rmse_history: Dict[int, float] = field(default_factory=dict)
 
 
 class LiveVisualizer:
@@ -83,16 +93,15 @@ def get_exp_lr_func(lr_init, lr_final, max_steps):
 class Trainer:
     def __init__(self, model: GasSplattingModel, cfg: Config):
         self.model = model
-        self.train_cfg = cfg.train
-        self.densify_cfg = cfg.densify
+        self.cfg = cfg
         
-        self.visualizer = None if self.train_cfg.no_live_vis else LiveVisualizer(model.map_size)
+        self.visualizer =  LiveVisualizer(model.map_size) if self.cfg.train.live_vis else None
 
         self.optimizer: optim.Optimizer = optim.Adam([
-            {'params': [model._pos], 'lr': self.train_cfg.pos_lr, 'name': 'pos'},
-            {'params': [model._scale], 'lr': self.train_cfg.scale_lr, 'name': 'scale'},
-            {'params': [model._rotation], 'lr': self.train_cfg.rotation_lr, 'name': 'rotation'},
-            {'params': [model._concentration], 'lr': self.train_cfg.concentration_lr, 'name': 'concentration'},
+            {'params': [model._pos], 'lr': self.cfg.train.pos_lr, 'name': 'pos'},
+            {'params': [model._scale], 'lr': self.cfg.train.scale_lr, 'name': 'scale'},
+            {'params': [model._rotation], 'lr': self.cfg.train.rotation_lr, 'name': 'rotation'},
+            {'params': [model._concentration], 'lr': self.cfg.train.concentration_lr, 'name': 'concentration'},
         ])
 
         self.pos_lr_func = get_exp_lr_func(
@@ -118,9 +127,9 @@ class Trainer:
 
     def is_densify_it(self, iteration):
         dfrom, duntil, dinterval = (
-            self.densify_cfg.densify_from,
-            self.densify_cfg.densify_until,
-            self.densify_cfg.densify_interval
+            self.cfg.densify.densify_from,
+            self.cfg.densify.densify_until,
+            self.cfg.densify.densify_interval
         )
 
         return (iteration >= dfrom and iteration <= duntil and (iteration - dfrom) % dinterval == 0)
@@ -136,17 +145,16 @@ class Trainer:
             elif param_group["name"] == "concentration":
                 param_group["lr"] = self.concentration_lr_func(iteration)
 
-    def train(self, beams, y_true):
-        loss_history = []
-        densify_history = {}
-        pbar = tqdm(range(self.train_cfg.iterations), desc="Training", dynamic_ncols=True)
-        
+    def train(self, sim_data: SimulationData):
+        results = TrainingResults()
+
+        pbar = tqdm(range(self.cfg.train.iterations), desc="Training", dynamic_ncols=True)        
         for it in pbar:
             self.optimizer.zero_grad()
             
-            y_pred = self.model(beams)
+            y_pred = self.model(sim_data.beams)
 
-            l1_loss = F.l1_loss(y_pred, y_true)
+            l1_loss = F.l1_loss(y_pred, sim_data.y_true)
             
             total_loss = l1_loss
             
@@ -156,7 +164,7 @@ class Trainer:
             self.optimizer.step()
             
             current_loss = total_loss.item()
-            loss_history.append(current_loss)
+            results.loss_history.append(current_loss)
 
             if it % 100 == 0:
                 pbar.set_postfix({'loss': f'{current_loss:.5f}'})
@@ -166,36 +174,49 @@ class Trainer:
                 with torch.no_grad():
                     self.visualizer.update(
                         iteration=it, 
-                        loss_history=loss_history, 
+                        loss_history=results.loss_history, 
                         pos_tensor=self.model.get_pos(), 
                         concentration_tensor=self.model.get_concentration()
                     )
             
+            # Model evaluation
+            if self.cfg.train.do_eval and it % self.cfg.train.eval_interval == 0:
+                with torch.no_grad():
+                    from utils.plot_utils import render_gaussian_map 
+                    current_map = render_gaussian_map(
+                        self.model, 
+                        self.cfg.sim.map_size, 
+                        self.cfg.device, 
+                        cell_size=self.cfg.sim.cell_size
+                    )
+                    rmse = np.sqrt(np.mean((current_map - sim_data.img_gt)**2))
+                    
+                    # Store it inside the class instance
+                    results.rmse_history[it] = rmse
+
             # Densification
             if self.is_densify_it(it):
                 with torch.no_grad():
                     stats = self.model.densify_and_prune(self.optimizer)
-                    densify_history[it] = stats
+                    results.densify_history[it] = stats
 
                     # Forzamos un refresco justo después de densificar para ver el cambio instantáneo
                     if self.visualizer:
                         self.visualizer.update(
                             iteration=it, 
-                            loss_history=loss_history, 
+                            loss_history=results.loss_history, 
                             pos_tensor=self.model.get_pos(), 
                             concentration_tensor=self.model.get_concentration()
                         )
             
-            if current_loss < self.train_cfg.target_loss:
+            if current_loss < self.cfg.train.target_loss:
                 pbar.write(f"Training ended at iteration: {it}")
                 break
 
         pbar.close()
-
-        print(f"Splits: {self.model.splits}   Clones: {self.model.clones}")
         
         # Deactivate interactive mode
         if self.visualizer:
             plt.ioff()
 
-        return loss_history, densify_history
+        return results

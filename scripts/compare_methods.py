@@ -22,7 +22,6 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg: Config = args.cfg
-    cfg.train.no_live_vis = True
     
     # ------ Simulation data -------
     print(f"--- Simulation data ---")
@@ -79,7 +78,7 @@ def main():
     # Measure Reconstruction (Training) Time for Gas Splatting
     t_gs_recon_start = time.time()
     trainer = Trainer(model, cfg)
-    trainer.train(sim_data.beams, sim_data.measurements)
+    trainer.train(sim_data)
     gs_recon_time = time.time() - t_gs_recon_start
     
     gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)

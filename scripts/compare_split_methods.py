@@ -22,7 +22,6 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     base_cfg: Config = args.cfg
-    base_cfg.train.no_live_vis = True
     
     seeds = [42, 100, 1234, 777, 999]
     methods = ["Original Split", "Long-Axis Split"]
@@ -52,7 +51,7 @@ def main():
             model, _, _ = setup_gs_model(sim_data, test_cfg)
             
             trainer = Trainer(model, test_cfg)
-            trainer.train(sim_data.beams, sim_data.measurements)
+            trainer.train(sim_data)
             elapsed_time = time.time() - t_start
             
             gs_img = render_gaussian_map(model, test_cfg.sim.map_size, test_cfg.device, cell_size=test_cfg.sim.cell_size)

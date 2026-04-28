@@ -6,6 +6,7 @@ import matplotlib.gridspec as gridspec
 from config import Config
 from gs_model import GasSplattingModel
 from utils.sim_utils import SimulationData
+from trainer import TrainingResults
 
 def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, float], device: torch.device, cell_size):
     """
@@ -70,7 +71,7 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
 
     plt.show()
 
-def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, densify_history, cfg: Config):
+def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, results: TrainingResults, cfg: Config):
     """Shows GT, GS reconstruction, loss history, and densification events"""
 
     map_w, map_h = cfg.sim.map_size
@@ -122,11 +123,11 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
 
     # 4. Loss History (Middle Row)
     ax4 = fig.add_subplot(gs[1, :])
-    ax4.set_title(f"Loss History (Final Loss = {loss_history[-1]:.4f})")
-    ax4.plot(loss_history, color='blue', alpha=0.8)
+    ax4.set_title(f"Loss History (Final Loss = {results.loss_history[-1]:.4f})")
+    ax4.plot(results.loss_history, color='blue', alpha=0.8)
     ax4.set_ylabel("Total Loss")
     ax4.set_yscale('log')
-    ax4.set_xlim(0, len(loss_history))
+    ax4.set_xlim(0, len(results.loss_history))
     ax4.grid(True, which="both", ls="--", alpha=0.3)
     ax4.tick_params(labelbottom=False) # Ocultamos los números de X para que no rocen con el gráfico de abajo
 
@@ -137,10 +138,10 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     ax5.set_ylabel("Count")
 
     # Extract densification stats
-    iters = list(densify_history.keys())
-    clones = [d['clones'] for d in densify_history.values()]
-    splits = [d['splits'] for d in densify_history.values()]
-    prunes = [d['prunes'] for d in densify_history.values()]
+    iters = list(results.densify_history.keys())
+    clones = [d['clones'] for d in results.densify_history.values()]
+    splits = [d['splits'] for d in results.densify_history.values()]
+    prunes = [d['prunes'] for d in results.densify_history.values()]
 
     # Stacked bars
     bar_width = cfg.densify.densify_interval * 0.4 

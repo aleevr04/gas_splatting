@@ -27,7 +27,6 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg = args.cfg
-    cfg.train.no_live_vis = True
 
     # Dictionaries for error and time results
     results_nmse = {it: [] for it in iteration_list}
@@ -60,7 +59,7 @@ def main():
             t_start = time.time()
             model, _, _ = setup_gs_model(sim_data, cfg)
             trainer = Trainer(model, cfg)
-            trainer.train(sim_data.beams, sim_data.measurements)
+            trainer.train(sim_data)
             train_time = time.time() - t_start
 
             # Evaluation
