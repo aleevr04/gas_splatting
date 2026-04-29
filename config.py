@@ -27,7 +27,7 @@ class SimulationParams:
 @dataclass
 class TrainParams:
     pos_lr: float = 0.008
-    scale_lr: float = 0.001
+    scale_lr: float = 0.003
     rotation_lr: float = 0.001
     concentration_lr: float = 0.005
 
@@ -42,7 +42,7 @@ class TrainParams:
 @dataclass
 class DensificationParams:
     gradient_threshold: float = 0.005
-    scale_threshold: float = 0.1
+    scale_threshold: float = 0.05
     prune_threshold: float = 0.005
     densify_from: int = 100
     densify_until: int = 750
