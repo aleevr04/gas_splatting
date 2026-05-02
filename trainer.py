@@ -148,6 +148,11 @@ class Trainer:
     def train(self, sim_data: SimulationData):
         results = TrainingResults()
 
+        # Early stopping init
+        ema_loss = None
+        best_ema_loss = float('inf')
+        patience_counter = 0
+
         pbar = tqdm(range(self.cfg.train.iterations), desc="Training", dynamic_ncols=True)        
         for it in pbar:
             self.optimizer.zero_grad()
@@ -166,10 +171,32 @@ class Trainer:
             current_loss = total_loss.item()
             results.loss_history.append(current_loss)
 
+            # --- Early stopping ---
+            # Update the smoothed EMA loss
+            if ema_loss is None:
+                ema_loss = current_loss
+            else:
+                ema_loss = (self.cfg.train.ema_alpha * current_loss) + ((1 - self.cfg.train.ema_alpha) * ema_loss)
+            
+            # Check that we have passed the last densification iteration
+            if it > self.cfg.densify.densify_until:
+                # Check for significant improvement
+                if ema_loss < best_ema_loss - self.cfg.train.early_stopping_min_delta:
+                    best_ema_loss = ema_loss
+                    patience_counter = 0  # Reset patience if we hit a new best
+                else:
+                    patience_counter += 1 # Increment if it stalled or got worse
+                    
+                # Halt if patience runs out
+                if patience_counter >= self.cfg.train.early_stopping_patience:
+                    tqdm.write(f"Early stopping triggered at iteration {it} (EMA Loss stalled at {ema_loss:.5f})")
+                    break 
+            # ----------------------------
+
             if it % 100 == 0:
                 pbar.set_postfix({'loss': f'{current_loss:.5f}'})
             
-            # Real time visualization
+            # --- Real time visualization ---
             if self.visualizer and it % 20 == 0:
                 with torch.no_grad():
                     self.visualizer.update(
@@ -178,8 +205,9 @@ class Trainer:
                         pos_tensor=self.model.get_pos(), 
                         concentration_tensor=self.model.get_concentration()
                     )
+            # ---------------------------------
             
-            # Model evaluation
+            # --- Model evaluation ---
             if self.cfg.train.do_eval and it % self.cfg.train.eval_interval == 0:
                 with torch.no_grad():
                     from utils.plot_utils import render_gaussian_map 
@@ -193,14 +221,15 @@ class Trainer:
                     
                     # Store it inside the class instance
                     results.rmse_history[it] = rmse
+            # ----------------------------
 
-            # Densification
+            # --- Densification ---
             if self.is_densify_it(it):
                 with torch.no_grad():
                     stats = self.model.densify_and_prune(self.optimizer)
                     results.densify_history[it] = stats
 
-                    # Forzamos un refresco justo después de densificar para ver el cambio instantáneo
+                    # Force a visualizer update to see the change
                     if self.visualizer:
                         self.visualizer.update(
                             iteration=it, 
@@ -208,10 +237,7 @@ class Trainer:
                             pos_tensor=self.model.get_pos(), 
                             concentration_tensor=self.model.get_concentration()
                         )
-            
-            if current_loss < self.cfg.train.target_loss:
-                pbar.write(f"Training ended at iteration: {it}")
-                break
+            # -------------------------
 
         pbar.close()
         
