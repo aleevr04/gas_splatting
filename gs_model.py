@@ -213,29 +213,73 @@ class GasSplattingModel(nn.Module):
         self._rotation = optimizable_tensors["rotation"]
 
     def split(self, optimizer: torch.optim.Optimizer, mask, N=2):
-        # Generate new positions based on original gaussian functions
-        stds = self.get_scale()[mask].repeat(N, 1)
-        means = torch.zeros((stds.size(0), 2), device=stds.device)
-        samples = torch.normal(mean=means, std=stds)
+        if hasattr(self.densify_cfg, 'long_axis_split') and self.densify_cfg.long_axis_split:
+            # --- MASS-CONSERVING LONG-AXIS SPLIT ---
+            N = 2
+            
+            pos = self.get_pos()[mask]
+            scales = self.get_scale()[mask]
+            rots = self.get_rotation_matrix()[mask]
+            concs = self.get_concentration()[mask]
+            
+            # Determine longest axis
+            max_axis_idx = torch.argmax(scales, dim=1)
+            idx = torch.arange(scales.size(0))
+            
+            # Shift new positions using a factor c
+            c = 0.5
+            shift_local = torch.zeros_like(scales)
+            shift_local[idx, max_axis_idx] = c * scales[idx, max_axis_idx]
+            
+            # Transform local shifts to the global coordinate system
+            shift_global = torch.bmm(rots, shift_local.unsqueeze(-1)).squeeze(-1)
+            
+            new_pos = torch.cat([
+                pos + shift_global,
+                pos - shift_global
+            ], dim=0)
+            
+            new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
+            new_pos = torch.min(new_pos, self.map_size - 1e-5)
+            new_pos = inverse_sigmoid(new_pos, self.map_size)
+            
+            # Mass Conservation (Scales). Minor scale stays untouched
+            new_scales = scales.clone()
+            new_scales[idx, max_axis_idx] *= math.sqrt(1 - c**2)
+            
+            new_scale = torch.log(torch.cat([new_scales, new_scales], dim=0))
+            
+            # Mass Conservation (Concentration)
+            new_concs = concs / (2.0 * math.sqrt(1 - c**2))
+            new_concentration = inverse_softplus(torch.cat([new_concs, new_concs], dim=0))
+            
+            new_rotation = self._rotation[mask].repeat(N)
+            
+        else:
+            # --- ORIGINAL SPLIT ---
+            # Generate new positions based on original gaussian functions
+            stds = self.get_scale()[mask].repeat(N, 1)
+            means = torch.zeros((stds.size(0), 2), device=stds.device)
+            samples = torch.normal(mean=means, std=stds)
 
-        # Transform to global coordinate system
-        rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
-        new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
+            # Transform to global coordinate system
+            rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
+            new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
 
-        # Avoid invalid positions and transform to parameter's space
-        new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
-        new_pos = torch.min(new_pos, self.map_size - 1e-5)
-        new_pos = inverse_sigmoid(new_pos, self.map_size)
+            # Avoid invalid positions and transform to parameter's space
+            new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
+            new_pos = torch.min(new_pos, self.map_size - 1e-5)
+            new_pos = inverse_sigmoid(new_pos, self.map_size)
 
-        # Divide original concentration by N
-        new_concentration = inverse_softplus(
-            self.get_concentration()[mask].repeat(N) * (1 / N)
-        )
+            # Divide original concentration by N
+            new_concentration = inverse_softplus(
+                self.get_concentration()[mask].repeat(N) * (1 / N)
+            )
 
-        # Divide original scale by a factor of 0.8 * N
-        new_scale = self._scale[mask].repeat(N, 1) - math.log(0.8 * N)
+            # Divide original scale by a factor of 0.8 * N
+            new_scale = self._scale[mask].repeat(N, 1) - math.log(0.8 * N)
 
-        new_rotation = self._rotation[mask].repeat(N)
+            new_rotation = self._rotation[mask].repeat(N)
 
         tensors_dict = {
             "pos": new_pos,

@@ -27,7 +27,6 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg = args.cfg
-    cfg.train.no_live_vis = True
 
     # Generate beams for training and validating the model
     training_beams = cfg.sim.num_beams
@@ -77,7 +76,7 @@ def main():
             
             # Train
             trainer = Trainer(model, cfg)
-            trainer.train(beams_training, y_true_training)
+            trainer.train(sim_data_train)
 
             # Evaluation
             with torch.no_grad():

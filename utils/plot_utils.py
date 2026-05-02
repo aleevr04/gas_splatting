@@ -6,6 +6,7 @@ import matplotlib.gridspec as gridspec
 from config import Config
 from gs_model import GasSplattingModel
 from utils.sim_utils import SimulationData
+from trainer import TrainingResults
 
 def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, float], device: torch.device, cell_size):
     """
@@ -70,8 +71,8 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
 
     plt.show()
 
-def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, loss_history, densify_history, cfg: Config):
-    """Shows GT, GS reconstruction, loss history, and densification events"""
+def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, results: TrainingResults, cfg: Config):
+    """Shows GT, GS reconstruction, loss history (with optional RMSE), and densification events"""
 
     map_w, map_h = cfg.sim.map_size
     grid_w = int(map_w / cfg.sim.cell_size)
@@ -112,7 +113,7 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     ax2.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax, interpolation='bilinear')
     ax2.scatter(pos[:, 0], pos[:, 1], marker='P', c='k', edgecolors='w', s=30, linewidths=1.0)
 
-    # 3. Reconstruction Grid (Top Righ)
+    # 3. Reconstruction Grid (Top Right)
     ax3 = fig.add_subplot(gs[0, 2])
     ax3.set_title(f"GS Reconstruction (Grid)\nRMSE = {rmse:.4f}")
     ax3.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
@@ -120,37 +121,61 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     # Single Colorbar
     fig.colorbar(im1, ax=[ax1, ax2, ax3], label="ppm", fraction=0.015, pad=0.02)
 
+    # ==========================================
     # 4. Loss History (Middle Row)
+    # ==========================================
     ax4 = fig.add_subplot(gs[1, :])
-    ax4.set_title(f"Loss History (Final Loss = {loss_history[-1]:.4f})")
-    ax4.plot(loss_history, color='blue', alpha=0.8)
-    ax4.set_ylabel("Total Loss")
+    ax4.set_title(f"Loss History (Final Loss = {results.loss_history[-1]:.4f})")
+    
+    # Plot standard Loss on the left axis
+    line_loss = ax4.plot(results.loss_history, color='blue', alpha=0.6, label="Total Loss (L1)")
+    ax4.set_ylabel("Total Loss", color='blue')
     ax4.set_yscale('log')
-    ax4.set_xlim(0, len(loss_history))
+    ax4.set_xlim(0, len(results.loss_history))
     ax4.grid(True, which="both", ls="--", alpha=0.3)
-    ax4.tick_params(labelbottom=False) # Ocultamos los números de X para que no rocen con el gráfico de abajo
+    ax4.tick_params(axis='y', labelcolor='blue')
+    ax4.tick_params(labelbottom=False)
 
+    lines = line_loss
+    
+    # If rmse_history has data, plot it on a twin right axis
+    if results.rmse_history:
+        ax4_rmse = ax4.twinx()
+        iters = list(results.rmse_history.keys())
+        rmse_vals = list(results.rmse_history.values())
+        
+        line_rmse = ax4_rmse.plot(iters, rmse_vals, color='red', alpha=0.8, linewidth=2, marker='o', markersize=4, label="Spatial RMSE")
+        ax4_rmse.set_ylabel("RMSE (ppm)", color='red')
+        ax4_rmse.tick_params(axis='y', labelcolor='red')
+        
+        lines += line_rmse # Combine lines for a single legend
+        
+    labels = [str(l.get_label()) for l in lines]
+    ax4.legend(lines, labels, loc='upper right')
+
+    # ==========================================
     # 5. Densification Events (Bottom Row)
+    # ==========================================
     ax5 = fig.add_subplot(gs[2, :], sharex=ax4)
     ax5.set_title("Densification Events")
     ax5.set_xlabel("Iteration")
     ax5.set_ylabel("Count")
 
-    # Extract densification stats
-    iters = list(densify_history.keys())
-    clones = [d['clones'] for d in densify_history.values()]
-    splits = [d['splits'] for d in densify_history.values()]
-    prunes = [d['prunes'] for d in densify_history.values()]
+    if results.densify_history:
+        iters = list(results.densify_history.keys())
+        clones = [d['clones'] for d in results.densify_history.values()]
+        splits = [d['splits'] for d in results.densify_history.values()]
+        prunes = [d['prunes'] for d in results.densify_history.values()]
 
-    # Stacked bars
-    bar_width = cfg.densify.densify_interval * 0.4 
-    ax5.bar(iters, clones, width=bar_width, label='Clones', color='skyblue')
-    ax5.bar(iters, splits, width=bar_width, bottom=clones, label='Splits', color='orange')
-    
-    bottom_prunes = [c + s for c, s in zip(clones, splits)]
-    ax5.bar(iters, prunes, width=bar_width, bottom=bottom_prunes, label='Prunes', color='red')
+        bar_width = cfg.densify.densify_interval * 0.4 
+        ax5.bar(iters, clones, width=bar_width, label='Clones', color='skyblue')
+        ax5.bar(iters, splits, width=bar_width, bottom=clones, label='Splits', color='orange')
+        
+        bottom_prunes = [c + s for c, s in zip(clones, splits)]
+        ax5.bar(iters, prunes, width=bar_width, bottom=bottom_prunes, label='Prunes', color='red')
 
-    ax5.legend(loc='upper right')
+        ax5.legend(loc='upper right')
+        
     ax5.grid(True, axis='y', ls="--", alpha=0.3)
 
     plt.show()

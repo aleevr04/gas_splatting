@@ -41,30 +41,32 @@ def cell2xy(cell_rc: tuple, cell_size_m: float) -> tuple[float, float]:
 #           GAS DISTRIBUTION
 # ==========================================
 
-def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5, gauss_filter: bool = True, seed = None) -> np.ndarray:
+def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5) -> np.ndarray:
     """Generates a grid gas distribution given the amount of gas sources."""
-    if seed is not None:
-        np.random.seed(seed)
     
     rows, cols = grid_size
     gas_map = np.zeros(grid_size)
 
+    # Place random concetration in random cells
     for _ in range(num_blobs):
         r = np.random.randint(rows // 5, 4 * rows // 5)
         c = np.random.randint(cols // 5, 4 * cols // 5)
         gas_map[r, c] = np.random.uniform(5.0, 10.0)
 
-    if gauss_filter:
-        sigma_r = rows / np.random.uniform(6, 12)
-        sigma_c = cols / np.random.uniform(6, 12)
-        gas_map = gaussian_filter(gas_map, sigma=(sigma_r, sigma_c))
+    # Smooth result to get cloudy shapes
+    sigma_r = rows / np.random.uniform(6, 12)
+    sigma_c = cols / np.random.uniform(6, 12)
+    gas_map = gaussian_filter(gas_map, sigma=(sigma_r, sigma_c))
 
+    # Add noise
     noise = np.random.rand(rows, cols)
     gas_map += noise * (gas_map.max() * 0.1)
 
+    # Remove concentration from cells below threshold
     threshold = gas_map.max() * 0.3
     gas_map[gas_map < threshold] = 0
 
+    # Normalize [0,1]
     if gas_map.max() > 0:
         gas_map = gas_map / gas_map.max()
 
@@ -385,8 +387,7 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
 
         img_gt = generate_gas_distribution(
             grid_size=(grid_h, grid_w), 
-            num_blobs=cfg.sim.num_blobs, 
-            gauss_filter=not cfg.sim.no_gauss_filter,
+            num_blobs=cfg.sim.num_blobs
         )
 
     # --- Obstacles ---

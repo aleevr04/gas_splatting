@@ -30,11 +30,11 @@ def main():
     trainer = Trainer(model, cfg)
 
     print("Starting Gas Splatting training...")
-    loss_history, densify_history = trainer.train(sim_data.beams, sim_data.measurements)
-    print(f"Loss: {loss_history[-1]:.6f}")
+    results = trainer.train(sim_data)
+    print(f"Loss: {results.loss_history[-1]:.6f}")
 
     # --- Plot Results ---
-    plot_training_results(model, sim_data, loss_history, densify_history, cfg)
+    plot_training_results(model, sim_data, results, cfg)
 
 if __name__ == "__main__":
     main()

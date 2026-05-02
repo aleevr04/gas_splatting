@@ -20,7 +20,6 @@ class SimulationParams:
 
     num_beams: int = 30
     num_blobs: int = 5
-    no_gauss_filter: bool = field(default=False, action="store_true")
     
     noise: bool = field(default=False, action="store_true") # Add noise to simulated measurements
     snr_db: int = 30 # Signal-to-noise ratio (dB)
@@ -28,21 +27,30 @@ class SimulationParams:
 @dataclass
 class TrainParams:
     pos_lr: float = 0.008
-    scale_lr: float = 0.001
+    scale_lr: float = 0.003
     rotation_lr: float = 0.001
     concentration_lr: float = 0.005
-    iterations: int = 1500
-    target_loss: float = 1e-5
-    no_live_vis: bool = field(default=False, action="store_true")
+
+    iterations: int = 1500 # Max number of iterations
+
+    early_stopping_patience: int = 100      # How many iterations to wait for an improvement
+    early_stopping_min_delta: float = 1e-3  # Minimum improvement required to reset the patience counter
+    ema_alpha: float = 0.6                  # Smoothing factor (Lower = smoother, more memory of past loss)
+
+    do_eval: bool = field(default=False, action="store_true") # Evaluate model during training using ground truth
+    eval_interval: int = 25 # Model evaluation interval
+
+    live_vis: bool = field(default=False, action="store_true")
 
 @dataclass
 class DensificationParams:
     gradient_threshold: float = 0.005
-    scale_threshold: float = 0.1
+    scale_threshold: float = 0.05
     prune_threshold: float = 0.005
     densify_from: int = 100
     densify_until: int = 750
     densify_interval: int = 50
+    long_axis_split: bool = field(default=False, action="store_true")
 
 @dataclass
 class Config:

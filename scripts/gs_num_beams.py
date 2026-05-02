@@ -70,7 +70,7 @@ def main():
             # Training
             t_gs_train = time.time()
             trainer = Trainer(model, cfg)
-            trainer.train(sim_data.beams, sim_data.measurements)
+            trainer.train(sim_data)
             gs_train_time = time.time() - t_gs_train
             
             results_time[n_beams].append(gs_setup_time + gs_train_time)
