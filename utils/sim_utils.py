@@ -6,6 +6,7 @@ from tqdm import tqdm
 from dataclasses import dataclass
 from skimage.draw import line
 from shapely.geometry import LineString, Polygon, MultiLineString, Point
+from shapely.ops import unary_union
 from scipy.sparse import dok_matrix
 from scipy.ndimage import gaussian_filter
 
@@ -70,6 +71,60 @@ def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5) -> np.ndarra
     if gas_map.max() > 0:
         gas_map = gas_map / gas_map.max()
 
+    return gas_map
+
+def generate_fractal_gas_distribution(
+        grid_size, scale_fraction=0.2, octaves=3, 
+        threshold=0.3, power=2.0, center_bias=2.0):
+    """
+    Generates center-biased, scale-invariant gas distribution using fractal noise.
+    
+    - scale_fraction: Size of base blobs relative to map size (e.g., 0.15 = 15%).
+    - center_bias: How aggressively to pull clouds to the center. 
+                   0.0 = no bias (everywhere), >2.0 = tightly packed in center.
+    """
+    height, width = grid_size
+    
+    # 1. Dynamic Scale
+    base_scale = min(height, width) * scale_fraction
+    
+    # Generate Fractal Noise (Same as before, using base_scale)
+    noise = np.zeros(grid_size)
+    frequency, amplitude = 1.0, 1.0
+    
+    for _ in range(octaves):
+        base = np.random.rand(*grid_size)
+        smoothed = gaussian_filter(base, sigma=base_scale / frequency)
+        noise += smoothed * amplitude
+        amplitude *= 0.5
+        frequency *= 2.0
+        
+    noise = (noise - noise.min()) / (noise.max() - noise.min())
+    
+    # 2. Create Gaussian Envelope (Center Mask)
+    if center_bias > 0.0:
+        y, x = np.indices(grid_size)
+        center_y, center_x = height / 2.0, width / 2.0
+        
+        # Calculate squared distance from the center for every cell
+        dist_sq = (x - center_x)**2 + (y - center_y)**2
+        max_dist_sq = (width / 2.0)**2 + (height / 2.0)**2
+        
+        # Create the mask: e^(-(distance^2) / variance)
+        variance = max_dist_sq / center_bias
+        mask = np.exp(-dist_sq / variance)
+        
+        # Apply the envelope to force edges towards zero
+        noise = noise * mask
+
+    # 3. Threshold and Power Curve
+    gas_map = np.maximum(0, noise - threshold)
+    
+    if gas_map.max() > 0:
+        gas_map = gas_map / gas_map.max()
+        
+    gas_map = gas_map ** power
+    
     return gas_map
 
 # ==========================================
@@ -195,81 +250,74 @@ def generate_beams_from_obstacles(occupancy_grid: np.ndarray, cell_size: float):
 
     return beams
 
-def _get_exact_intersection(beam_line: LineString, r: int, c: int, cell_size: float, point_idx: int):
-    """Helper to find the exact geometric intersection point between a line and a cell."""
-    x_min, y_min = c * cell_size, r * cell_size
-    poly = Polygon([(x_min, y_min), (x_min + cell_size, y_min), 
-                    (x_min + cell_size, y_min + cell_size), (x_min, y_min + cell_size)])
+def build_obstacles_geometry(occupancy_grid: np.ndarray, cell_size: float):
+    obstacle_polys = []
     
-    inter = beam_line.intersection(poly)
-    if inter.is_empty:
-        return None
+    occupied_indices = np.argwhere(occupancy_grid != 0)
+    
+    for r, c in occupied_indices:
+        x_min = c * cell_size
+        y_min = r * cell_size
+        poly = Polygon([
+            (x_min, y_min), 
+            (x_min + cell_size, y_min), 
+            (x_min + cell_size, y_min + cell_size), 
+            (x_min, y_min + cell_size)
+        ])
+        obstacle_polys.append(poly)
         
-    if isinstance(inter, LineString):
-        return inter.coords[point_idx]
-    elif isinstance(inter, Point):
-        return (inter.x, inter.y)
-    elif isinstance(inter, MultiLineString):
-        geom = inter.geoms[-1] if point_idx == -1 else inter.geoms[0]
-        return geom.coords[point_idx]
-    return None
+    return unary_union(obstacle_polys)
 
-def truncate_beam(start: tuple, end: tuple, occupancy_grid: np.ndarray, cell_size: float):
+def truncate_beam(start: tuple, end: tuple, obstacles_geometry):
     """
     Extracts the first valid, unoccluded free-space segment of a beam.
     Modifies both start and end points to avoid obstacles.
     Returns None if the beam is entirely occluded.
-    """
-    x0, y0 = start
-    x1, y1 = end
-    
-    grid_h, grid_w = occupancy_grid.shape
-    
-    c0, r0 = int(np.clip(x0 // cell_size, 0, grid_w - 1)), int(np.clip(y0 // cell_size, 0, grid_h - 1))
-    c1, r1 = int(np.clip(x1 // cell_size, 0, grid_w - 1)), int(np.clip(y1 // cell_size, 0, grid_h - 1))
-    
-    rr, cc = line(r0, c0, r1, c1)
-    if len(rr) == 0:
-        return None
-        
-    collisions = occupancy_grid[rr, cc] != 0
-    is_free = ~collisions
-    
-    # 1. If there's no free space at all, discard the beam completely
-    if not np.any(is_free):
-        return None
-        
+    """    
     beam_line = LineString([start, end])
-        
-    # 2. Find where the beam ENTERS free space (new start)
-    idx_first_free = int(np.argmax(is_free))
     
-    if idx_first_free == 0:
-        # Beam started naturally in free space
-        new_start = start
-    else:
-        # Beam started inside an obstacle. Get the exact point where it LEAVES the last obstacle cell.
-        r_obs, c_obs = rr[idx_first_free - 1], cc[idx_first_free - 1]
-        # point_idx = -1 gives us the LAST point inside the obstacle (i.e., the exit point)
-        pt = _get_exact_intersection(beam_line, r_obs, c_obs, cell_size, point_idx=-1)
-        new_start = pt if pt else start
+    # Shapely comprueba muy rápido internamente si los "bounding boxes" se tocan
+    if not beam_line.intersects(obstacles_geometry):
+        return start, end
         
-    # 3. Find where the beam HITS the next obstacle (new end)
-    remaining_collisions = collisions[idx_first_free:]
+    # Restar los obstáculos a la línea
+    free_space = beam_line.difference(obstacles_geometry)
     
-    if not np.any(remaining_collisions):
-        # Beam never hits an obstacle after entering free space
-        new_end = end
-    else:
-        # Get the exact point where it ENTERS the first obstacle cell
-        hit_offset = int(np.argmax(remaining_collisions))
-        idx_hit = idx_first_free + hit_offset
-        r_hit, c_hit = rr[idx_hit], cc[idx_hit]
-        # point_idx = 0 gives us the FIRST point inside the obstacle (i.e., the entry point)
-        pt = _get_exact_intersection(beam_line, r_hit, c_hit, cell_size, point_idx=0)
-        new_end = pt if pt else end
+    if free_space.is_empty:
+        return None
         
-    return new_start, new_end
+    if free_space.geom_type == 'LineString':
+        coords = list(free_space.coords)
+        return coords[0], coords[-1]
+        
+    elif free_space.geom_type == 'MultiLineString':
+        first_segment = free_space.geoms[0]
+        coords = list(first_segment.coords)
+        return coords[0], coords[-1]
+
+    return None
+
+def generate_free_space_beams(occupancy_grid: np.ndarray, cell_size: float, num_beams: int):
+    """Generates beams using random free space points"""
+    free_cells = np.argwhere(occupancy_grid == 0)
+    
+    if len(free_cells) < 2:
+        return []
+        
+    beams = []
+    for _ in range(num_beams):
+        idx1, idx2 = np.random.choice(len(free_cells), size=2, replace=False)
+        
+        r1, c1 = free_cells[idx1]
+        r2, c2 = free_cells[idx2]
+        
+        # Convertir a metros (centrado en la celda)
+        p1 = (c1 * cell_size + cell_size/2, r1 * cell_size + cell_size/2)
+        p2 = (c2 * cell_size + cell_size/2, r2 * cell_size + cell_size/2)
+        
+        beams.append((p1, p2))
+        
+    return beams
 
 # ==========================================
 #     BEAM GAS INTEGRAL / SYSTEM MATRIX
@@ -385,10 +433,7 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
         grid_w = int(map_w / cfg.sim.cell_size)
         grid_h = int(map_h / cfg.sim.cell_size)
 
-        img_gt = generate_gas_distribution(
-            grid_size=(grid_h, grid_w), 
-            num_blobs=cfg.sim.num_blobs
-        )
+        img_gt = generate_fractal_gas_distribution(grid_size=(grid_h, grid_w))
 
     # --- Obstacles ---
     occupancy_grid = None
@@ -408,24 +453,28 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
 
     # ------ Beams ------
     print("Generating beams...")
-    
-    num_random_beams = cfg.sim.num_beams // 2
-    num_radial_beams = cfg.sim.num_beams - num_random_beams 
-    
-    real_beams_list = generate_random_beams(cfg.sim.map_size, num_random_beams)
-    real_beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
+    real_beams_list = []
 
-    # Truncate real beams if occupancy is provided
     if occupancy_grid is not None:
+        real_beams_list += generate_free_space_beams(occupancy_grid, cfg.sim.cell_size, cfg.sim.num_beams)
+
+        # Truncate real beams if occupancy is provided
+        obstacles_geometry = build_obstacles_geometry(occupancy_grid, cfg.sim.cell_size)
         truncated_beams = []
         for start, end in real_beams_list:
-            truncated_beam = truncate_beam(start, end, occupancy_grid, cfg.sim.cell_size)
+            truncated_beam = truncate_beam(start, end, obstacles_geometry)
             if truncated_beam is not None:
                 new_start, new_end = truncated_beam
                 if math.hypot(new_end[0] - new_start[0], new_end[1] - new_start[1]) > 1e-3:
                     truncated_beams.append(truncated_beam)
         real_beams_list = truncated_beams
         print(f"Beams after truncating: {len(real_beams_list)}")
+    else:
+        num_random_beams = cfg.sim.num_beams // 2
+        num_radial_beams = cfg.sim.num_beams - num_random_beams 
+        
+        real_beams_list += generate_random_beams(cfg.sim.map_size, num_random_beams)
+        real_beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
 
     beams_list = list(real_beams_list)
 
