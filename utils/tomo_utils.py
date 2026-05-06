@@ -4,96 +4,229 @@ from scipy.sparse.linalg import lsqr
 from tqdm import tqdm
 
 #===============================
-# ART - ITERATIVE METHOD FOR ILL POSED PROBLEMS WITH NO PRIOR INFORMATION
+# SART - SIMULTANEOUS ALGEBRAIC RECONSTRUCTION TECHNIQUE
 #===============================
-def art(system_matrix, measurements, num_iterations, initial_guess=None, relaxation_factor=1.0):
+def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, num_iterations: int = 50, initial_guess=None, relaxation_factor: float = 1.0):
     """
-        The Algebraic Reconstruction Technique (ART) is a method used in tomographic reconstruction, 
-        based on iteratively solving a system of linear equations derived from projection data. 
-        It is particularly useful when the problem is sparse or underdetermined.
-
-        Iterative Correction: Instead of solving all equations simultaneously, ART updates the solution 
-        one equation at a time, adjusting the estimate incrementally.
-    """
-    num_voxels = system_matrix.shape[1]
-    if initial_guess is None:
-        reconstruction = np.zeros(num_voxels)
-    else:
-        reconstruction = initial_guess.copy()
-
-    for iteration in tqdm(range(num_iterations), desc="ART"):
-        for i in range(len(measurements)):
-            row = system_matrix.getrow(i)
-            if row.nnz > 0:
-                projection = measurements[i]
-                predicted_projection = row.dot(reconstruction)
-                error = projection - predicted_projection
-                update = relaxation_factor * error * row.toarray().flatten() / (row.power(2).sum() + 1e-6)
-                reconstruction += update
-
-                # Enforce non-negativity
-                reconstruction[reconstruction < 0] = 0
-
-    return reconstruction
-
-
-
-#===============================
-# TIKHONOV - L2 norm regularization, penalizing solutions with high gas concentrations (stability)
-#===============================
-def tikhonov_iterative(system_matrix: sparse.csr_matrix, measurements: np.ndarray, alpha: float, num_iterations: int = 100, initial_guess=None):
-    """
-        Performs tomographic reconstruction using Tikhonov regularization (L2 regularization).
-        It iteratively minimizes the squared error between the measurements and the projected
-        reconstruction, while also penalizing the squared magnitude of the reconstructed image
-        to promote stability and reduce noise. The 'alpha' parameter controls the strength of
-        the regularization. An iterative gradient descent approach is used here (Landweber).
-    """
-    num_voxels = system_matrix.shape[1]
-    if initial_guess is None:
-        reconstruction = np.zeros(num_voxels)
-    else:
-        reconstruction = initial_guess.copy()
-
-    # Implementing an iterative version (e.g., Landweber iteration with regularization)
-    if num_iterations is None:
-        num_iterations = 100
-    learning_rate = 0.001
-
-    for iteration in tqdm(range(num_iterations), desc="Tikhonov"):
-        residual = measurements - system_matrix.dot(reconstruction)
-        gradient = system_matrix.transpose().dot(residual) - alpha * reconstruction
-        # system_matrix.transpose().dot(residual): is the standard back-projection term, indicating how to update the reconstruction to better fit the measurements. 
-        # - alpha * reconstruction: is the Tikhonov regularization term. This term acts as a penalty on the magnitude (L2 norm) of the solution.
-        reconstruction += learning_rate * gradient
-        reconstruction[reconstruction < 0] = 0  # Enforce non-negativity
-
-    return reconstruction
-
-def tikhonov_direct(system_matrix: sparse.csr_matrix, measurements: np.ndarray, alpha: float) -> np.ndarray:
-    """
-    Performs tomographic reconstruction using direct Tikhonov regularization (L2 regularization)
-    by solving the regularized normal equations.
+    Simultaneous Algebraic Reconstruction Technique (SART).
+    
+    Unlike ART (which updates the image ray by ray sequentially), 
+    SART updates the image simultaneously by averaging the corrections of all 
+    rays passing through a voxel. This drastically reduces the "salt and pepper" 
+    noise typical of ART.
+    
+    The mathematical update in matrix form is:
+    g^{(k+1)} = g^{(k)} + lambda * V^{-1} * A^T * W^{-1} * (p - A * g^{(k)})
+    where:
+      - W is the diagonal matrix with the sum of the rows of A (ray weights).
+      - V is the diagonal matrix with the sum of the columns of A (voxel weights).
 
     Args:
         system_matrix (sparse.csr_matrix): The system matrix (A).
-        measurements (np.ndarray): The projection measurements (y).
-        alpha (float): The Tikhonov regularization parameter.
+        measurements (np.ndarray): The vector of measurements/projections (p).
+        num_iterations (int): Number of iterations to perform.
+        initial_guess (np.ndarray, optional): Initial guess for the image.
+        relaxation_factor (float, optional): Relaxation parameter (lambda). 
+                                             Typical values are between 0.1 and 1.0.
 
     Returns:
-        np.ndarray: The reconstructed image.
+        np.ndarray: The reconstructed image reshaped as a square 2D array.
     """
     num_voxels = system_matrix.shape[1]
+    
+    if initial_guess is None:
+        reconstruction = np.zeros(num_voxels, dtype=np.float32)
+    else:
+        reconstruction = initial_guess.astype(np.float32).copy()
 
-    ATA = system_matrix.transpose().dot(system_matrix)
-    L = sparse.identity(num_voxels) * alpha
-    rhs = system_matrix.transpose().dot(measurements)
-    reconstruction_flat = sparse.linalg.spsolve(ATA + L, rhs)
+    # 1. Precompute the row (W) and column (V) sums for SART normalization
+    # A small epsilon (1e-8) is added to avoid division by zero in empty areas.
+    eps = 1e-8
+    
+    # W_j = sum_i A_ji (Sum of weights along each ray)
+    row_sums = np.array(system_matrix.sum(axis=1)).flatten()
+    row_sums[row_sums == 0] = eps
+    
+    # V_i = sum_j A_ji (Sum of weights along each voxel)
+    col_sums = np.array(system_matrix.sum(axis=0)).flatten()
+    col_sums[col_sums == 0] = eps
 
-    # Avoid negative values
-    reconstruction_flat[reconstruction_flat < 0] = 0
+    # 2. Iterative reconstruction loop
+    for iteration in tqdm(range(num_iterations), desc="SART"):
+        # Step A: Forward projection -> A * g
+        predicted_projection = system_matrix.dot(reconstruction)
+        
+        # Step B: Calculate the projection error -> p - A * g
+        error = measurements - predicted_projection
+        
+        # Step C: Normalize the error by row sums -> (p - A * g) / W
+        # This corresponds to the normalized individual correction of each ray
+        weighted_error = error / row_sums
+        
+        # Step D: Back-projection of the weighted error -> A^T * weighted_error
+        # Distributes the error back to the voxels
+        back_projection = system_matrix.transpose().dot(weighted_error)
+        
+        # Step E: Normalize by column sums and apply relaxation 
+        # -> lambda * (A^T * weighted_error) / V
+        update = relaxation_factor * (back_projection / col_sums)
+        
+        # Step F: Update the estimate
+        reconstruction += update
+        
+        # Step G: Apply non-negativity constraint (physically necessary for gases)
+        reconstruction[reconstruction < 0] = 0
 
-    return reconstruction_flat
+    # Reshape the flattened 1D array into a 2D square matrix
+    side = int(np.sqrt(num_voxels))
+    return reconstruction.reshape((side, side))
+
+#===============================
+# RBF-COUPLED SART TOMOGRAPHY (G-CSRBF + SART)
+# Reference: Gao, X. et al. (2022) "Radial Basis Function Coupled SART Method 
+# for Dynamic LAS Tomography"
+#===============================
+def build_g_csrbf_matrix(grid_size: tuple, cell_size_m: float, R: float, 
+                         beta: float, epsilon: float, center_step: int):
+    """
+    Builds the Phi matrix (sparse) of Gaussian Radial Basis Functions.
+    Iterates only over the cells within the Bounding Box of radius R.
+    """
+    rows, cols = grid_size
+    num_voxels = rows * cols
+    
+    center_rows = np.arange(0, rows, center_step)
+    center_cols = np.arange(0, cols, center_step)
+    num_centers = len(center_rows) * len(center_cols)
+    
+    row_indices = []
+    col_indices = []
+    data = []
+    
+    q_idx = 0
+    r_pixels = int(np.ceil(R / cell_size_m))
+    
+    for cr in center_rows:
+        for cc in center_cols:
+            # Physical center of the RBF (meters)
+            xq = cc * cell_size_m + cell_size_m / 2.0
+            yq = cr * cell_size_m + cell_size_m / 2.0
+            
+            # Search limits (Bounding box)
+            min_r = max(0, cr - r_pixels)
+            max_r = min(rows - 1, cr + r_pixels)
+            min_c = max(0, cc - r_pixels)
+            max_c = min(cols - 1, cc + r_pixels)
+            
+            for r in range(min_r, max_r + 1):
+                for c in range(min_c, max_c + 1):
+                    xi = c * cell_size_m + cell_size_m / 2.0
+                    yi = r * cell_size_m + cell_size_m / 2.0
+                    
+                    dist = np.hypot(xi - xq, yi - yq)
+                    
+                    if dist <= R:
+                        # G-CSRBF (Equation 12)
+                        val = ((1.0 - (dist / R)**2)**beta) * np.exp(-(epsilon * dist)**2)
+                        pixel_idx = r * cols + c
+                        
+                        row_indices.append(pixel_idx)
+                        col_indices.append(q_idx)
+                        data.append(val)
+                        
+            q_idx += 1
+            
+    Phi = sparse.csr_matrix((data, (row_indices, col_indices)), 
+                            shape=(num_voxels, num_centers), dtype=np.float32)
+    return Phi
+
+def rbf_sart(system_matrix: sparse.csr_matrix, 
+             measurements: np.ndarray, 
+             grid_size: tuple,
+             cell_size_m: float,
+             target_rbf_x: int = 15,
+             overlap_factor: float = 2.5,
+             beta: float = 1.5,
+             epsilon_base: float = 2.0,
+             num_iterations: int = 50, 
+             relaxation_factor: float = 1.0):
+    """
+    RBF-SART Tomography (Gao et al. 2023).
+    Dynamically scaled to be independent of the grid resolution.
+    
+    Args:
+        system_matrix: Sensitivity matrix L (M rays x N cells).
+        measurements: Absorbance vector p (M rays).
+        grid_size: (rows, columns) of the image.
+        cell_size_m: Size in meters of each cell.
+        target_rbf_x: Approximate number of Gaussians across the width of the map.
+        overlap_factor: How many times the radius covers the distance between two centers (2.0 to 3.0).
+        beta: Shape of the compact support dome (1.0 to 1.5 recommended).
+        epsilon_base: How much the Gaussian narrows before reaching the edge R (1.5 to 2.5).
+        num_iterations: SART iterations.
+        relaxation_factor: Relaxation factor lambda.
+    """
+    rows, cols = grid_size
+    
+    # ---------------------------------------------------------
+    # 1. DYNAMIC CALCULATION OF PHYSICAL PARAMETERS
+    # ---------------------------------------------------------
+    # Calculate how many cells apart an RBF center should be placed
+    center_step = max(1, cols // target_rbf_x)
+    
+    # Distance in meters between centers
+    dist_centros_m = center_step * cell_size_m
+    
+    # The Radius (R) ensures that the bells always overlap in the same way
+    R = overlap_factor * dist_centros_m
+    
+    # Epsilon is scaled with R so that the bell decay is consistent
+    epsilon = epsilon_base / R
+
+    # ---------------------------------------------------------
+    # 2. MATRIX CONSTRUCTION
+    # ---------------------------------------------------------
+    Phi = build_g_csrbf_matrix(grid_size, cell_size_m, R, beta, epsilon, center_step)
+    
+    # Couple classical SART with the RBF domain (W = L * Phi)
+    W = system_matrix.dot(Phi)
+    num_centers = W.shape[1]
+    
+    # Precompute SART weights on the new W matrix
+    eps_val = 1e-8
+    row_sums = np.array(W.sum(axis=1)).flatten()
+    row_sums[row_sums == 0] = eps_val
+    
+    col_sums = np.array(W.sum(axis=0)).flatten()
+    col_sums[col_sums == 0] = eps_val
+
+    # ---------------------------------------------------------
+    # 3. SART ITERATION (OVER ALPHA COEFFICIENTS)
+    # ---------------------------------------------------------
+    alpha = np.zeros(num_centers, dtype=np.float32)
+    
+    for _ in tqdm(range(num_iterations), desc="RBF-SART Iterations"):
+        predicted = W.dot(alpha)
+        error = measurements - predicted
+        
+        weighted_error = error / row_sums
+        back_proj = W.transpose().dot(weighted_error)
+        
+        alpha += relaxation_factor * (back_proj / col_sums)
+        
+        # Positivity constraint on coefficients (Guarantees image > 0)
+        alpha[alpha < 0] = 0
+
+    # ---------------------------------------------------------
+    # 4. FINAL RECONSTRUCTION
+    # ---------------------------------------------------------
+    # Project coefficients to image space (Density = Phi * Alpha)
+    reconstruction = Phi.dot(alpha)
+    
+    # Ensure non-negativity due to floating point rounding errors
+    reconstruction[reconstruction < 0] = 0
+    
+    return reconstruction.reshape(rows, cols)
 
 #===============================
 # LFD - Low First Derivative (Smoothness)
@@ -107,8 +240,8 @@ def lfd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: t
     Args:
         system_matrix (sparse.csr_matrix): The system matrix (A).
         measurements (np.ndarray): The projection measurements (y).
-        beta (float): The regularization parameter controlling the strength of the
-                      smoothness constraint.
+        alpha (float): The regularization parameter controlling the strength of the
+                       smoothness constraint.
 
     Returns:
         np.ndarray: The reconstructed image.
@@ -147,98 +280,11 @@ def lfd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: t
     # Apply non-negativity constraint
     reconstruction_flat[reconstruction_flat < 0] = 0
 
-    return reconstruction_flat.reshape(grid_size[0], grid_size[1])
-
-
-
-#===============================
-# LSD - Low Second Derivative (Smoothness)
-#===============================
-def lsd(
-    system_matrix: sparse.csr_matrix,
-    measurements: np.ndarray,
-    grid_size: tuple,
-    alpha: float
-) -> np.ndarray:
-    """
-    Performs tomographic reconstruction with second-order smoothness regularization,
-    penalizing large second spatial derivatives in both horizontal and vertical
-    directions.
-
-    Args:
-        system_matrix (sparse.csr_matrix): The system matrix (A).
-        measurements (np.ndarray): The projection measurements (y).
-        grid_size (tuple): The shape of the grid (rows, columns).
-        alpha (float): The regularization parameter controlling the strength of the
-                       second-order smoothness constraint.
-
-    Returns:
-        np.ndarray: The reconstructed flat array of gas concentrations.
-    """
-    rows, cols = grid_size
-    num_pixels = system_matrix.shape[1]
-
-    # Create second-order difference operators (Laplacian-like)
-    Dx2 = sparse.dok_matrix((num_pixels, num_pixels))
-    Dy2 = sparse.dok_matrix((num_pixels, num_pixels))
-
-    # Iterate through each pixel to build the difference operators
-    for r in range(rows):
-        for c in range(cols):
-            idx = r * cols + c  # Flattened index of the pixel
-
-            # Horizontal second derivative approximation
-            if c > 0 and c < cols - 1:
-                # Central difference: f''(x) = f(x-1) - 2f(x) + f(x+1)
-                Dx2[idx, idx - 1] = 1
-                Dx2[idx, idx] = -2
-                Dx2[idx, idx + 1] = 1
-            elif c == 0 and cols > 1:
-                # Forward difference at the left edge
-                Dx2[idx, idx] = -1
-                Dx2[idx, idx + 1] = 1
-            elif c == cols - 1 and cols > 1:
-                # Backward difference at the right edge
-                Dx2[idx, idx] = 1
-                Dx2[idx, idx - 1] = -1
-
-            # Vertical second derivative approximation
-            if r > 0 and r < rows - 1:
-                # Central difference: f''(y) = f(y-1) - 2f(y) + f(y+1)
-                Dy2[idx, idx - cols] = 1
-                Dy2[idx, idx] = -2
-                Dy2[idx, idx + cols] = 1
-            elif r == 0 and rows > 1:
-                # Forward difference at the top edge
-                Dy2[idx, idx] = -1
-                Dy2[idx, idx + cols] = 1
-            elif r == rows - 1 and rows > 1:
-                # Backward difference at the bottom edge
-                Dy2[idx, idx] = 1
-                Dy2[idx, idx - cols] = -1
-
-    Dx2 = Dx2.tocsr()
-    Dy2 = Dy2.tocsr()
-
-    # Construct the augmented system matrix for Tikhonov regularization
-    augmented_A = sparse.vstack([system_matrix, alpha * Dx2, alpha * Dy2], format='csr')
-
-    # Construct the augmented measurement vector (zeros for the regularization parts)
-    augmented_b = np.concatenate([measurements, np.zeros(Dx2.shape[0] + Dy2.shape[0])])
-
-    # Solve the augmented system using lsqr
-    reconstruction_flat = lsqr(augmented_A, augmented_b)[0]
-
-    # Apply non-negativity constraint
-    reconstruction_flat[reconstruction_flat < 0] = 0
-
-    return reconstruction_flat.reshape(rows, cols)
-
+    return reconstruction_flat.reshape(*grid_size)
 
 #===============================
 # LTD (LOW THIRD DERIVATIVE)
 #===============================
-
 def ltd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: tuple, alpha: float = 0.01) -> np.ndarray:
     """
     Implements the Low Third Derivative (LTD) method for tomographic reconstruction.
@@ -257,10 +303,10 @@ def ltd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: t
     rows, cols = grid_size
     num_voxels = rows * cols
 
-    # Componente de la tercera derivada para las filas (horizontal)
+    # Third derivative component for the rows (horizontal)
     # 
-    # Esta matriz penaliza las variaciones bruscas en la dirección horizontal (a lo largo de las filas).
-    # Se construye con bloques diagonales, uno para cada fila del grid.
+    # This matrix penalizes sharp variations in the horizontal direction (along the rows).
+    # It is built with diagonal blocks, one for each row of the grid.
     def create_d3_1d(length):
         if length < 4:
             return sparse.csr_matrix((0, length))
@@ -269,38 +315,38 @@ def ltd(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: t
     row_reg_blocks = [create_d3_1d(cols) for _ in range(rows)]
     D3_row = sparse.block_diag(row_reg_blocks)
 
-    # Componente de la tercera derivada para las columnas (vertical)
+    # Third derivative component for the columns (vertical)
     # 
-    # Esta matriz penaliza las variaciones bruscas en la dirección vertical (a lo largo de las columnas).
-    # La construcción correcta es más compleja. Se crea un operador D3 en el espacio 1D
-    # y luego se 'replica' para aplicarlo a lo largo de las columnas del vector aplanado.
+    # This matrix penalizes sharp variations in the vertical direction (along the columns).
+    # The correct construction is more complex. A D3 operator is created in 1D space
+    # and then 'replicated' to apply it along the columns of the flattened vector.
     D3_col = sparse.lil_matrix((cols * (rows - 3), num_voxels))
     for j in range(cols):
         for i in range(rows - 3):
             idx = i * cols + j
-            # Stencil [-1, 3, -3, 1] aplicado a lo largo de la columna j
+            # Stencil [-1, 3, -3, 1] applied along column j
             D3_col[i * cols + j, idx] = -1
             D3_col[i * cols + j, idx + cols] = 3
             D3_col[i * cols + j, idx + 2 * cols] = -3
             D3_col[i * cols + j, idx + 3 * cols] = 1
     
-    D3_col = D3_col.tocsr() # Convertir a CSR para un mejor rendimiento
+    D3_col = D3_col.tocsr() # Convert to CSR for better performance
 
-    # Construcción del sistema de ecuaciones aumentado
-    # Se añade la regularización como nuevas "ecuaciones" con peso alpha.
+    # Construction of the augmented system of equations
+    # Regularization is added as new 'equations' with weight alpha.
     augmented_matrix = sparse.vstack([system_matrix, alpha * D3_row, alpha * D3_col])
     
-    # El vector aumentado tiene ceros para las ecuaciones de regularización,
-    # ya que buscamos minimizar la tercera derivada a un valor cercano a cero.
+    # The augmented vector has zeros for the regularization equations,
+    # since we seek to minimize the third derivative to a value close to zero.
     n_row_reg = D3_row.shape[0]
     n_col_reg = D3_col.shape[0]
     augmented_measurements = np.hstack([measurements, np.zeros(n_row_reg), np.zeros(n_col_reg)])
 
-    # Resolver el sistema de mínimos cuadrados con el método iterativo lsqr.
+    # Solve the least squares system with the iterative lsqr method.
     reconstructed_image_flat, istop, itn, normr = lsqr(augmented_matrix, augmented_measurements, iter_lim=500)[:4]
 
-    # Aplicar una restricción de no negatividad para asegurar que la solución sea físicamente
-    # plausible (los valores de atenuación no pueden ser negativos).
+    # Apply a non-negativity constraint to ensure the solution is physically
+    # plausible (attenuation values cannot be negative).
     reconstructed_image_flat[reconstructed_image_flat < 0] = 0
 
     reconstructed_image = reconstructed_image_flat.reshape(rows, cols)
@@ -326,7 +372,7 @@ def ltd_weighted(system_matrix: sparse.csr_matrix, measurements: np.ndarray, gri
     rows, cols = grid_size
     num_voxels = rows * cols
 
-    # --- 1. Construcción de la matriz de regularización (sin cambios) ---
+    # --- 1. Construction of the regularization matrix (unchanged) ---
     def create_d3_1d(length):
         if length < 4:
             return sparse.csr_matrix((0, length))
@@ -345,26 +391,26 @@ def ltd_weighted(system_matrix: sparse.csr_matrix, measurements: np.ndarray, gri
             D3_col[i * cols + j, idx + 3 * cols] = 1
     D3_col = D3_col.tocsr()
 
-    # --- 2. Preparación de las matrices ponderadas y el vector de medidas ---
+    # --- 2. Preparation of weighted matrices and measurement vector ---
     if weights is None:
-        # Si no se proporcionan pesos, usa un vector de unos.
+        # If no weights are provided, use a vector of ones.
         weights = np.ones(measurements.shape[0])
     
-    # Crea una matriz diagonal a partir del vector de pesos.
+    # Creates a diagonal matrix from the weights vector.
     W = sparse.diags(weights)
 
-    # Pondera la matriz del sistema y el vector de mediciones.
+    # Weights the system matrix and the measurement vector.
     weighted_system_matrix = W @ system_matrix
     weighted_measurements = W @ measurements
     
-    # --- 3. Construcción del sistema de ecuaciones aumentado (con la matriz y medidas ponderadas) ---
+    # --- 3. Construction of the augmented system of equations (with weighted matrix and measurements) ---
     augmented_matrix = sparse.vstack([weighted_system_matrix, alpha * D3_row, alpha * D3_col])
     
     n_row_reg = D3_row.shape[0]
     n_col_reg = D3_col.shape[0]
     augmented_measurements = np.hstack([weighted_measurements, np.zeros(n_row_reg), np.zeros(n_col_reg)])
 
-    # --- 4. Resolución del sistema y post-procesamiento ---
+    # --- 4. System resolution and post-processing ---
     reconstructed_image_flat, istop, itn, normr = lsqr(augmented_matrix, augmented_measurements, iter_lim=500)[:4]
 
     reconstructed_image_flat[reconstructed_image_flat < 0] = 0
@@ -372,81 +418,3 @@ def ltd_weighted(system_matrix: sparse.csr_matrix, measurements: np.ndarray, gri
     reconstructed_image = reconstructed_image_flat.reshape(rows, cols)
 
     return reconstructed_image
-
-
-#===============================
-# PDE Difusion Advection Regularization
-#===============================
-def domain_knowledge_regularized_landweber_iterative(system_matrix: sparse.csr_matrix, measurements: np.ndarray, alpha: float = 0.01, rho: float = 0.001, num_iterations: int = 100, image_shape=None, flow_field=None, diffusion_coefficient=None, initial_guess=None):
-    """
-    Performs tomographic reconstruction using the iterative Landweber method
-    with domain knowledge regularization based on a gas dispersion PDE.
-
-    Args:
-        system_matrix (sparse.csr_matrix): The system matrix (A).
-        measurements (np.ndarray): The projection measurements (y).
-        alpha (float, optional): The relaxation parameter (omega) for the
-                                 Landweber update. Defaults to 0.01.
-        rho (float, optional): The domain knowledge regularization parameter.
-                               Defaults to 0.001.
-        num_iterations (int, optional): The number of iterations to perform. Defaults to 100.
-        image_shape (tuple, optional): The shape of the image (rows, cols).
-                                       Required for discretizing the PDE.
-        flow_field (np.ndarray, optional): The velocity field for advection.
-        diffusion_coefficient (float, optional): The diffusion coefficient.
-        initial_guess (np.ndarray, optional): Initial guess for the reconstruction.
-                                              Defaults to a zero array.
-
-    Returns:
-        np.ndarray: The reconstructed image (flattened).
-    """
-    num_voxels = system_matrix.shape[1]
-    if image_shape is None:
-        side = int(np.sqrt(num_voxels))
-        image_shape = (side, side)
-
-    if initial_guess is None:
-        reconstruction = np.zeros(num_voxels, dtype=np.float32)
-    else:
-        reconstruction = initial_guess.astype(np.float32).copy()
-
-    # 1. Discretize the Gas Dispersion PDE
-    def get_discretized_pde_operator(shape, flow, diff_coeff):
-        """
-        Placeholder function to generate the sparse matrix operator for the
-        discretized gas dispersion PDE based on the provided parameters.
-        This needs to be implemented based on the specific PDE and
-        discretization scheme from the Wiedemann et al. paper.
-        """
-        # Example: A simple diffusion operator (Laplacian) - REPLACE WITH ACTUAL PDE
-        rows, cols = shape
-        num_pixels = rows * cols
-        L = csr_matrix((num_pixels, num_pixels))
-        for i in range(rows):
-            for j in range(cols):
-                idx = i * cols + j
-                L[idx, idx] -= 4 * diff_coeff  # Center
-
-                if i > 0: L[idx, idx - cols] += diff_coeff  # Up
-                if i < rows - 1: L[idx, idx + cols] += diff_coeff  # Down
-                if j > 0: L[idx, idx - 1] += diff_coeff  # Left
-                if j < cols - 1: L[idx, idx + 1] += diff_coeff  # Right
-        return L
-
-    PDE_operator = get_discretized_pde_operator(image_shape, flow_field, diffusion_coefficient)
-
-    for iteration in tqdm(range(num_iterations), desc="PDE Reg. Landweber"):
-        projection_estimate = system_matrix.dot(reconstruction)
-        residual = measurements - projection_estimate
-        back_projection = system_matrix.transpose().dot(residual)
-
-        # 2. Calculate the PDE residual
-        pde_residual = PDE_operator.dot(reconstruction)
-
-        # 3. Formulate the regularization term (e.g., gradient of ||PDE(x)||^2)
-        regularization_term = rho * PDE_operator.transpose().dot(pde_residual)
-
-        # 4. Update the reconstruction
-        reconstruction = reconstruction + alpha * (back_projection - regularization_term)
-
-    return reconstruction

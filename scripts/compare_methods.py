@@ -43,19 +43,18 @@ def main():
     # ------- Traditional Methods -------
     print("\n--- Traditional Methods ---")
     
-    print("ART...")
-    art_iterations = 400
-    art_name = f"ART ({art_iterations} it)"
+    print("SART...")
+    art_iterations = 100
+    art_name = f"SART ({art_iterations} it)"
     t_start = time.time()
-    art_res = tm.art(system_matrix, measurements, num_iterations=art_iterations, relaxation_factor=1.6)
+    art_res = tm.sart(system_matrix, measurements, num_iterations=art_iterations)
     execution_times[art_name] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
     reconstructions[art_name] = art_res.reshape(sim_data.img_gt.shape)
     
-    print("Tikhonov...")
+    print("RBF Coupled SART...")
     t_start = time.time()
-    tik_res = tm.tikhonov_direct(system_matrix, measurements, alpha=0.2)
-    execution_times["Tikhonov"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
-    reconstructions["Tikhonov"] = tik_res.reshape(sim_data.img_gt.shape)
+    reconstructions["RBF Coupled SART"] = tm.rbf_sart(system_matrix, measurements, grid_size=sim_data.img_gt.shape, cell_size_m=cfg.sim.cell_size)
+    execution_times["RBF Coupled SART"] = {'setup': trad_setup_time, 'recon': time.time() - t_start}
 
     print("LFD (Low First Derivative)...")
     t_start = time.time()
