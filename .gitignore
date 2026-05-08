@@ -2,5 +2,6 @@ __pycache__/
 .venv
 
 plots/
+results/
 
 ground_truth/

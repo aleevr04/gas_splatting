@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,8 +6,8 @@ import matplotlib.gridspec as gridspec
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import SimulationData
 from trainer import TrainingResults
+from utils.sim_utils import SimulationData
 
 def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, float], device: torch.device, cell_size):
     """
@@ -179,3 +180,82 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     ax5.grid(True, axis='y', ls="--", alpha=0.3)
 
     plt.show()
+
+def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, results_ssim, results_time, save_path):
+    """
+    Genera una gráfica genérica de 1x3 (RMSE, SSIM, Tiempo) para cualquier experimento.
+    """
+    plt.rcParams.update({'font.size': 12})
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+
+    for method in methods_info.keys():
+        style = methods_info[method]["style"]
+        
+        # Means and std
+        rmse_means = [np.mean(results_rmse[method][x]) for x in x_values]
+        rmse_stds  = [np.std(results_rmse[method][x]) for x in x_values]
+        
+        ssim_means = [np.mean(results_ssim[method][x]) for x in x_values]
+        ssim_stds  = [np.std(results_ssim[method][x]) for x in x_values]
+        
+        time_means = [np.mean(results_time[method][x]) for x in x_values]
+        time_stds  = [np.std(results_time[method][x]) for x in x_values]
+
+        # --- RMSE ---
+        ax1.plot(x_values, rmse_means, label=method, 
+                 color=style["color"], marker=style["marker"], 
+                 linewidth=style.get("linewidth", 1.5), 
+                 markersize=style.get("markersize", 6))
+        ax1.fill_between(x_values, 
+                         np.array(rmse_means) - np.array(rmse_stds), 
+                         np.array(rmse_means) + np.array(rmse_stds), 
+                         color=style["color"], alpha=0.15)
+
+        # --- SSIM ---
+        ax2.plot(x_values, ssim_means, label=method, 
+                 color=style["color"], marker=style["marker"], 
+                 linewidth=style.get("linewidth", 1.5), 
+                 markersize=style.get("markersize", 6))
+        ax2.fill_between(x_values, 
+                         np.array(ssim_means) - np.array(ssim_stds), 
+                         np.array(ssim_means) + np.array(ssim_stds), 
+                         color=style["color"], alpha=0.15)
+
+        # --- Time ---
+        ax3.plot(x_values, time_means, label=method, 
+                 color=style["color"], marker=style["marker"], 
+                 linewidth=style.get("linewidth", 1.5), 
+                 markersize=style.get("markersize", 6))
+        ax3.fill_between(x_values, 
+                         np.array(time_means) - np.array(time_stds), 
+                         np.array(time_means) + np.array(time_stds), 
+                         color=style["color"], alpha=0.15)
+
+    # --- Plot details ---
+    ax1.set_title("RMSE Evolution", pad=15)
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel("RMSE vs Ground Truth")
+    ax1.set_xticks(x_values)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.legend()
+
+    ax2.set_title("SSIM Evolution", pad=15)
+    ax2.set_xlabel(x_label)
+    ax2.set_ylabel("SSIM")
+    ax2.set_xticks(x_values)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.legend()
+
+    ax3.set_title("Time Evolution", pad=15)
+    ax3.set_xlabel(x_label)
+    ax3.set_ylabel("Total Time (seconds)")
+    ax3.set_xticks(x_values)
+    ax3.grid(True, linestyle='--', alpha=0.7)
+    ax3.legend()
+
+    plt.tight_layout()
+    
+    # Save plot
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300)
+    print(f"\nPlot saved in: {save_path}")
