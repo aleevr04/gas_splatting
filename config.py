@@ -19,7 +19,6 @@ class SimulationParams:
     cell_size: float = 1.0
 
     num_beams: int = 30
-    num_blobs: int = 5
     
     noise: bool = field(default=False, action="store_true") # Add noise to simulated measurements
     snr_db: int = 30 # Signal-to-noise ratio (dB)

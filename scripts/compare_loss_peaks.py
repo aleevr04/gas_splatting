@@ -188,7 +188,6 @@ def main():
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300)
     print(f"Plot saved in: {save_path}")
-    plt.show()
 
 if __name__ == "__main__":
     main()

@@ -49,7 +49,7 @@ def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, flo
     return final_img.detach().cpu().numpy()
 
 def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
-    """Shows ground truth and initial reconstruction image"""
+    """Shows ground truth and initial reconstruction image, and saves it to the plots directory"""
 
     map_w, map_h = cfg.sim.map_size
 
@@ -70,10 +70,16 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
 
     fig.colorbar(im1, ax=[ax1, ax2], label="ppm", fraction=0.025, pad=0.05)
 
-    plt.show()
+    # Save plot instead of showing it
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'initial_guess.png')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"[+] Initial guess plot saved in: {save_path}")
+    
+    plt.close(fig) # Free memory
 
 def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, results: TrainingResults, cfg: Config):
-    """Shows GT, GS reconstruction, loss history (with optional RMSE), and densification events"""
+    """Saves a plot with GT, GS reconstruction, loss history (with optional RMSE), and densification events"""
 
     map_w, map_h = cfg.sim.map_size
     grid_w = int(map_w / cfg.sim.cell_size)
@@ -179,11 +185,17 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
         
     ax5.grid(True, axis='y', ls="--", alpha=0.3)
 
-    plt.show()
+    # Save plot instead of showing it
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'training_results.png')
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"[+] Training results plot saved in: {save_path}")
+    
+    plt.close(fig) # Free memory
 
 def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, results_ssim, results_time, save_path):
     """
-    Genera una gráfica genérica de 1x3 (RMSE, SSIM, Tiempo) para cualquier experimento.
+    Generates a generic 1x3 plot (RMSE, SSIM, Time) for any experiment and saves it.
     """
     plt.rcParams.update({'font.size': 12})
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
@@ -257,5 +269,7 @@ def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, res
     
     # Save plot
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300)
-    print(f"\nPlot saved in: {save_path}")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"\n[+] Plot saved in: {save_path}")
+    
+    plt.close(fig) # Free memory
