@@ -45,6 +45,22 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
 
     base_sim_data = generate_simulation_data(cfg)
     gt_img = base_sim_data.img_gt
+
+    # --- WARM-UP (Prevents Cold Start Penalty) ---
+    # We do a tiny, untimed run to wake up PyTorch and SciPy memory allocators
+    print(f"[Worker Process] -> Warming up Seed: {seed}...", flush=True)
+    _warmup_cfg = copy.deepcopy(cfg)
+    _warmup_cfg.train.iterations = 5 # Just 5 iterations
+    _warmup_sim = SimulationData(
+        beams=base_sim_data.beams[:10],
+        measurements=base_sim_data.measurements[:10],
+        y_true=base_sim_data.y_true[:10],
+        img_gt=gt_img
+    )
+    _func = AVAILABLE_METHODS["Gas Splatting"]["func"]
+    _func(system_matrix=None, measurements=_warmup_sim.measurements.cpu().numpy(), 
+          sim_data=_warmup_sim, cfg=_warmup_cfg, setup_time=0.0)
+    # ---------------------------------------------
     
     for n_beams in num_beams_list:
         sim_data = SimulationData(
@@ -87,7 +103,10 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
 def main():
     # --- Configuration ---
     num_beams_list = [10, 20, 30, 40, 50, 60] 
-    seeds = [42, 100, 1234, 777, 999]
+
+    num_seeds = 30
+    np.random.seed(42)
+    seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
     methods = list(AVAILABLE_METHODS.keys())
     
@@ -108,8 +127,8 @@ def main():
     print(f"Starting experiment: {len(num_beams_list)} beam configurations x {len(seeds)} seeds.")
 
     # --- Parallelization ---
-    # max_workers=None defaults to the number of physical CPU cores available
-    with ProcessPoolExecutor() as executor:
+    max_workers=4
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Dispatch all seeds to the process pool
         futures = {
             executor.submit(evaluate_single_seed, seed, cfg, num_beams_list, methods): seed 

@@ -36,6 +36,32 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
     # Work with a local copy of the configuration
     cfg = copy.deepcopy(base_cfg)
     cfg.sim.seed = seed
+
+    # --- WARM-UP (Prevents Cold Start Penalty) ---
+    # We do a tiny, untimed run to wake up PyTorch and SciPy memory allocators.
+    # We also build a small sparse matrix to warm up the SciPy C-backend.
+    print(f"[Worker Process] -> Warming up Seed: {seed}...", flush=True)
+    _warmup_cfg = copy.deepcopy(cfg)
+    _warmup_res = 20  # Use the smallest resolution for speed
+    _warmup_cfg.sim.cell_size = _warmup_cfg.sim.map_size[0] / _warmup_res
+    _warmup_cfg.train.iterations = 5  # Just 5 iterations
+    
+    _warmup_sim = generate_simulation_data(_warmup_cfg)
+    _warmup_matrix = create_system_matrix_sparse(
+        (_warmup_res, _warmup_res), 
+        _warmup_sim.beams.tolist(), 
+        _warmup_cfg.sim.cell_size
+    ).tocsr()
+    
+    _func = AVAILABLE_METHODS["Gas Splatting"]["func"]
+    _func(
+        system_matrix=_warmup_matrix, 
+        measurements=_warmup_sim.measurements.cpu().numpy(), 
+        sim_data=_warmup_sim, 
+        cfg=_warmup_cfg, 
+        setup_time=0.0
+    )
+    # ----------------------------------------------------
     
     # Local data structures to store the results exclusively for THIS seed
     local_rmse = {m: {r: 0.0 for r in resolutions} for m in methods}
@@ -102,7 +128,10 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
 def main():
     # --- Configuration ---
     resolutions = [20, 30, 40, 60, 80]
-    seeds = [42, 100, 1234, 777, 999]
+
+    num_seeds = 30
+    np.random.seed(42)
+    seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
     # Pull methods directly from the central registry
     methods = list(AVAILABLE_METHODS.keys())
@@ -123,8 +152,8 @@ def main():
     print(f"Starting experiment: {len(resolutions)} resolutions x {len(seeds)} seeds.")
 
     # --- Parallelization ---
-    # max_workers=None defaults to the number of physical CPU cores available
-    with ProcessPoolExecutor() as executor:
+    max_workers=4
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Dispatch all seeds to the process pool
         futures = {
             executor.submit(evaluate_single_seed, seed, cfg, resolutions, methods): seed 
@@ -146,7 +175,8 @@ def main():
         "experiment_name": "grid_resolution_evolution",
         "resolutions": resolutions,
         "seeds": seeds,
-        "map_size": cfg.sim.map_size
+        "map_size": cfg.sim.map_size,
+        "num_beams": cfg.sim.num_beams
     }
 
     all_results = {
