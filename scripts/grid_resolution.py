@@ -96,24 +96,14 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
             method_info = AVAILABLE_METHODS[method_name]
             func = method_info["func"]
             
-            if method_info.get("requires_matrix", True):
-                res_img, total_time = func(
-                    system_matrix=system_matrix, 
-                    measurements=measurements, 
-                    sim_data=sim_data, 
-                    cfg=cfg, 
-                    setup_time=matrix_setup_time
-                )
-            else:
-                # E.g., Gas Splatting does not need the precomputed sparse matrix
-                res_img, total_time = func(
-                    system_matrix=None, 
-                    measurements=measurements, 
-                    sim_data=sim_data, 
-                    cfg=cfg, 
-                    setup_time=0.0
-                )
-            
+            res_img, total_time = func(
+                system_matrix=system_matrix, 
+                measurements=measurements, 
+                sim_data=sim_data, 
+                cfg=cfg, 
+                setup_time=matrix_setup_time
+            )
+
             local_time[method_name][res] = total_time
             local_rmse[method_name][res] = rmse_loss(gt_img, res_img)
 

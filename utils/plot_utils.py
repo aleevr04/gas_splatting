@@ -9,6 +9,27 @@ from gs_model import GasSplattingModel
 from trainer import TrainingResults
 from utils.sim_utils import SimulationData
 
+def set_publication_style():
+    """Configures Matplotlib global style"""
+    plt.rcParams.update({
+        'font.family': 'sans-serif',
+        'font.size': 14,
+        'axes.titlesize': 16,
+        'axes.labelsize': 14,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 12,
+        'figure.titlesize': 18,
+        'lines.linewidth': 2.0,
+        'lines.markersize': 6,
+        'grid.alpha': 0.7,
+        'grid.linestyle': '--',
+        # --- Saving configuration ---
+        'savefig.bbox': 'tight',
+        'savefig.dpi': 300,
+        'savefig.pad_inches': 0.05
+    })
+
 def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, float], device: torch.device, cell_size):
     """
     Turns gaussians into a 2D image (numpy matrix)
@@ -73,7 +94,7 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
     # Save plot instead of showing it
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'initial_guess.png')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path)
     print(f"[+] Initial guess plot saved in: {save_path}")
     
     plt.close(fig) # Free memory
@@ -98,12 +119,10 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     mse = np.mean((img_pred - sim_data.img_gt)**2)
     rmse = np.sqrt(mse)
 
-    fig = plt.figure(figsize=(15, 8)) 
+    fig = plt.figure(figsize=(12, 8)) 
     
     # Grid of 3 rows. Images on top, Loss in the middle, Densification below
     gs = gridspec.GridSpec(3, 3, height_ratios=[1.5, 1, 1], hspace=0.3)
-
-    fig.suptitle(f"Initial Gaussians = {gaussians.initial_gaussians}  |  Final = {gaussians.num_gaussians}  |  Beams = {cfg.sim.num_beams}")
 
     # 1. GT (Top Left)
     ax1 = fig.add_subplot(gs[0, 0])
@@ -188,7 +207,7 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     # Save plot instead of showing it
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'training_results.png')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path)
     print(f"[+] Training results plot saved in: {save_path}")
     
     plt.close(fig) # Free memory
@@ -269,7 +288,7 @@ def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, res
     
     # Save plot
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path)
     print(f"\n[+] Plot saved in: {save_path}")
     
     plt.close(fig) # Free memory

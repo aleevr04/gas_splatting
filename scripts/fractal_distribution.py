@@ -7,14 +7,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from utils.sim_utils import generate_fractal_gas_distribution
+from utils.plot_utils import set_publication_style
 
 # Font global settings
-plt.rcParams.update({
-    'font.size': 14,
-    'axes.labelsize': 16,
-    'xtick.labelsize': 12,
-    'ytick.labelsize': 12
-})
+set_publication_style()
 
 # Parse args
 parser = ArgumentParser()

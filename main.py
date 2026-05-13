@@ -4,9 +4,9 @@ from simple_parsing import ArgumentParser
 from config import Config
 from trainer import Trainer
 from utils.init_utils import setup_gs_model
-from utils.plot_utils import plot_initial_guess, plot_training_results
+from utils.plot_utils import plot_initial_guess, plot_training_results, set_publication_style
 from utils.sim_utils import generate_simulation_data
-
+from utils.data_utils import save_experiment_results
 
 def main():
     # --- Configuration ---
@@ -14,6 +14,8 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg: Config = args.cfg
+
+    set_publication_style()
 
     print(f"Using device: {cfg.device}")
 
@@ -41,6 +43,26 @@ def main():
 
     # --- Plot Results ---
     plot_training_results(model, sim_data, results, cfg)
+
+    # --- Save Results ---
+    metadata = {
+        "experiment_name": "training",
+        "num_beams": cfg.sim.num_beams,
+        "map_size": cfg.sim.map_size,
+        "cell_size": cfg.sim.cell_size
+    }
+
+    results = {
+        "initial_gaussians": model.initial_gaussians,
+        "final_gaussians": model.num_gaussians,
+        "setup_time": setup_time,
+        "training_time": train_time,
+        "loss_history": results.loss_history,
+        "rmse_history": results.rmse_history,
+        "densify_history": results.densify_history
+    }
+
+    save_experiment_results(metadata, results)
 
 if __name__ == "__main__":
     main()

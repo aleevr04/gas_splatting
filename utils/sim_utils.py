@@ -4,8 +4,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from dataclasses import dataclass
-from skimage.draw import line
-from shapely.geometry import LineString, Polygon, MultiLineString, Point
+from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 from scipy.sparse import dok_matrix
 from scipy.ndimage import gaussian_filter
@@ -41,37 +40,6 @@ def cell2xy(cell_rc: tuple, cell_size_m: float) -> tuple[float, float]:
 # ==========================================
 #           GAS DISTRIBUTION
 # ==========================================
-
-def generate_gas_distribution(grid_size: tuple, num_blobs: int = 5) -> np.ndarray:
-    """Generates a grid gas distribution given the amount of gas sources."""
-    
-    rows, cols = grid_size
-    gas_map = np.zeros(grid_size)
-
-    # Place random concetration in random cells
-    for _ in range(num_blobs):
-        r = np.random.randint(rows // 5, 4 * rows // 5)
-        c = np.random.randint(cols // 5, 4 * cols // 5)
-        gas_map[r, c] = np.random.uniform(5.0, 10.0)
-
-    # Smooth result to get cloudy shapes
-    sigma_r = rows / np.random.uniform(6, 12)
-    sigma_c = cols / np.random.uniform(6, 12)
-    gas_map = gaussian_filter(gas_map, sigma=(sigma_r, sigma_c))
-
-    # Add noise
-    noise = np.random.rand(rows, cols)
-    gas_map += noise * (gas_map.max() * 0.1)
-
-    # Remove concentration from cells below threshold
-    threshold = gas_map.max() * 0.3
-    gas_map[gas_map < threshold] = 0
-
-    # Normalize [0,1]
-    if gas_map.max() > 0:
-        gas_map = gas_map / gas_map.max()
-
-    return gas_map
 
 def generate_fractal_gas_distribution(
         grid_size, scale_fraction=0.2, octaves=3, 

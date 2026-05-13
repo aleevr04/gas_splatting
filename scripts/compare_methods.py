@@ -11,14 +11,17 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
+from utils.plot_utils import set_publication_style
 from utils.methods_registry import AVAILABLE_METHODS
 
 def main():
     # --- Configuration ---
     parser = ArgumentParser(description="Compare visually Gas Splatting vs Traditional Methods")
-    parser.add_arguments(Config, dest="cfg")
+    parser.add_arguments(dataclass=Config, dest="cfg")
     args = parser.parse_args()
     cfg: Config = args.cfg
+
+    set_publication_style()
     
     # --- Simulation data ---
     print(f"--- Generating Simulation Data ---")
@@ -70,12 +73,12 @@ def main():
     # ---------------------------------------------------------
     # FIGURE 1: RECONSTRUCTIONS
     # ---------------------------------------------------------
-    fig, axes = plt.subplots(2, (num_methods + 2) // 2, figsize=(16, 10))
+    fig, axes = plt.subplots(2, (num_methods + 2) // 2, figsize=(10, 6))
     axes = axes.flatten()
     
     # Plot Ground Truth
     im_gt = axes[0].imshow(gt_img, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
-    axes[0].set_title("Ground Truth", fontsize=14, pad=15)
+    axes[0].set_title("Ground Truth")
     axes[0].axis('off')
     
     # Overlay beams on Ground Truth
@@ -91,30 +94,28 @@ def main():
         ssim_val = ssim(gt_img, img, data_range=data_range)
         t_total = execution_times[name]
 
-        title = f"{name}\nRMSE: {rmse:.4f} | SSIM: {ssim_val:.4f}\nTotal Time: {t_total:.2f}s"
         print(f"{name:<20}: RMSE = {rmse:.4f} | SSIM = {ssim_val:.4f} | Total Time = {t_total:.2f}s")
             
         axes[idx].imshow(img, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
-        axes[idx].set_title(title, fontsize=12)
+        axes[idx].set_title(name)
         axes[idx].axis('off')
         
     # Hide unused subplots
     for i in range(len(reconstructions) + 1, len(axes)):
         axes[i].axis('off')
 
-    fig.colorbar(im_gt, ax=axes.tolist(), label="Concentration (ppm)", fraction=0.03, pad=0.05)
+    fig.colorbar(im_gt, ax=axes.tolist(), label="ppm", fraction=0.03, pad=0.05)
     
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods.png')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path)
     print(f"\n[+] Reconstructions plot saved in: {save_path}")
 
     # ---------------------------------------------------------
     # FIGURE 2: ERROR MAPS
     # ---------------------------------------------------------
-    fig_err, axes_err = plt.subplots(2, (num_methods + 1) // 2, figsize=(16, 8))
+    fig_err, axes_err = plt.subplots(2, (num_methods + 1) // 2, figsize=(10, 6))
     axes_err = axes_err.flatten()
-    fig_err.suptitle("Spatial Error Distribution (Absolute Difference)", fontsize=18)
 
     # Compute absolute error maps and find the global maximum
     error_maps = {}
@@ -128,7 +129,7 @@ def main():
 
     for idx, (name, err_map) in enumerate(error_maps.items()):
         im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='hot', vmin=0, vmax=global_max_err)
-        axes_err[idx].set_title(f"{name} Error", fontsize=14)
+        axes_err[idx].set_title(name)
         axes_err[idx].axis('off')
 
     for i in range(len(error_maps), len(axes_err)):
@@ -137,7 +138,7 @@ def main():
     fig_err.colorbar(im_err, ax=axes_err.tolist(), label="Absolute Error (ppm)", fraction=0.03, pad=0.05)
     
     save_path_err = os.path.join(os.path.dirname(__file__), '..', 'plots', 'compare_methods_errors.png')
-    plt.savefig(save_path_err, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path_err)
     print(f"[+] Error maps plot saved in: {save_path_err}\n")
 
 if __name__ == "__main__":
