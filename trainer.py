@@ -1,7 +1,10 @@
+import os
+import shutil
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from PIL import Image
 import numpy as np
 from tqdm import tqdm
 from dataclasses import dataclass, field
@@ -50,6 +53,10 @@ class LiveVisualizer:
         plt.tight_layout()
         plt.show(block=False)
 
+        self.temp_dir = "plots/temp_frames"
+        os.makedirs(self.temp_dir, exist_ok=True)
+        self.frame_paths = []
+
     def update(self, iteration, loss_history, pos_tensor, concentration_tensor):
         # update loss
         x_data = list(range(len(loss_history)))
@@ -78,6 +85,37 @@ class LiveVisualizer:
         # Draw
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+
+        # Store frame
+        try:
+            frame_path = os.path.join(self.temp_dir, f"frame_{iteration:05d}.png")
+            self.fig.savefig(frame_path, format='png', facecolor='white', dpi=70) 
+            self.frame_paths.append(frame_path)
+        except Exception as e:
+            print(f"[Warning] Error saving frame {iteration}: {e}")
+    
+    def save_gif(self, filepath="plots/training_evolution.gif"):
+        if not self.frame_paths:
+            print("[GIF] There are no stored frames")
+            return
+            
+        print(f"[GIF] Saving GIF animation using {len(self.frame_paths)} frames...")
+
+        # Convert to Image
+        imgs = [Image.open(p).convert('RGB') for p in self.frame_paths]
+        
+        if imgs:
+            imgs[0].save(
+                filepath, 
+                save_all=True, 
+                append_images=imgs[1:], 
+                duration=100, 
+                loop=0
+            )
+            print(f"[+] Training GIF saved in: {filepath}")
+            
+        # Clean temporal directory
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
 
 
 def get_exp_lr_func(lr_init, lr_final, max_steps):
@@ -160,7 +198,7 @@ class Trainer:
             y_pred = self.model(sim_data.beams)
 
             l1_loss = F.l1_loss(y_pred, sim_data.y_true)
-            
+
             total_loss = l1_loss
             
             total_loss.backward()
@@ -241,8 +279,12 @@ class Trainer:
 
         pbar.close()
         
-        # Deactivate interactive mode
         if self.visualizer:
+            # Deactivate interactive mode
             plt.ioff()
+
+            # Save Training GIF
+            os.makedirs("plots", exist_ok=True)
+            self.visualizer.save_gif()
 
         return results
