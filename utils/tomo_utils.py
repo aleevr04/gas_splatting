@@ -6,7 +6,7 @@ from tqdm import tqdm
 #===============================
 # SART - SIMULTANEOUS ALGEBRAIC RECONSTRUCTION TECHNIQUE
 #===============================
-def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, num_iterations: int = 50, initial_guess=None, relaxation_factor: float = 1.0):
+def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: tuple , num_iterations: int = 50, initial_guess=None, relaxation_factor: float = 1.0):
     """
     Simultaneous Algebraic Reconstruction Technique (SART).
     
@@ -78,8 +78,7 @@ def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, num_iterati
         reconstruction[reconstruction < 0] = 0
 
     # Reshape the flattened 1D array into a 2D square matrix
-    side = int(np.sqrt(num_voxels))
-    return reconstruction.reshape((side, side))
+    return reconstruction.reshape(grid_size)
 
 #===============================
 # RBF-COUPLED SART TOMOGRAPHY (G-CSRBF + SART)

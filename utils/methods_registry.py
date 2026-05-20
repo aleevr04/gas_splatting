@@ -6,7 +6,9 @@ from utils.plot_utils import render_gaussian_map
 
 def run_sart(system_matrix, measurements, sim_data, cfg, setup_time=0.0):
     t0 = time.time()
-    res = tm.sart(system_matrix, measurements, num_iterations=400, relaxation_factor=1.6)
+    grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
+    grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+    res = tm.sart(system_matrix, measurements, grid_size=(grid_h, grid_w), num_iterations=400, relaxation_factor=1.6)
     recon_time = time.time() - t0
     return res, setup_time + recon_time
 
@@ -22,7 +24,7 @@ def run_lfd(system_matrix, measurements, sim_data, cfg, setup_time=0.0):
     t0 = time.time()
     grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
     grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
-    res = tm.lfd(system_matrix, measurements, grid_size=(grid_w, grid_h), alpha=0.07)
+    res = tm.lfd(system_matrix, measurements, grid_size=(grid_h, grid_w), alpha=0.07)
     recon_time = time.time() - t0
     return res, setup_time + recon_time
 
@@ -30,7 +32,7 @@ def run_ltd(system_matrix, measurements, sim_data, cfg, setup_time=0.0):
     t0 = time.time()
     grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
     grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
-    res = tm.ltd(system_matrix, measurements, grid_size=(grid_w, grid_h), alpha=5.0)
+    res = tm.ltd(system_matrix, measurements, grid_size=(grid_h, grid_w), alpha=5.0)
     recon_time = time.time() - t0
     return res, setup_time + recon_time
 
