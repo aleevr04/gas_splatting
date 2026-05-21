@@ -6,7 +6,7 @@ from simple_parsing import field
 
 @dataclass
 class InitParams:
-    initial_gaussians: Optional[int] = None
+    min_gaussians: int = 10
     coarse_proportion: float = 0.1
 
 @dataclass

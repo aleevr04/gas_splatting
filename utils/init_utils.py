@@ -12,7 +12,7 @@ from utils.sim_utils import (
     cell2xy
 )
 
-def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float], num_gaussians=None, coarse_cell_size: float = 2.5):
+def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float], min_gaussians: int, coarse_cell_size: float):
     """
     Runs a fast algebraic reconstruction (Least Squares) to get an initial estimate of the map and gaussians parameters.
     """
@@ -34,35 +34,56 @@ def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float]
     # Avoid negative values
     x_coarse[x_coarse < 0] = 0
     img_coarse = x_coarse.reshape((coarse_h, coarse_w))
-
-    if num_gaussians:
-        coordinates_int = peak_local_max(img_coarse, min_distance=1, threshold_rel=0.6, num_peaks=num_gaussians)
-    else:
-        coordinates_int = peak_local_max(img_coarse, min_distance=1, threshold_rel=0.6)
+    
+    # Find peaks in reconstruction
+    coordinates_int = peak_local_max(img_coarse, min_distance=1, threshold_rel=0.6)
     
     pos = []
     concentration = []
     
-    for coord in coordinates_int:
-        row, col = coord
+    # Peaks found. Place exactly one Gaussian per peak.
+    if len(coordinates_int) > 0:
+        for coord in coordinates_int:
+            row, col = coord
+            x, y = cell2xy((row, col), coarse_cell_size)
+            
+            x = min(max(x, 0.0), map_size[0] - 1e-5)
+            y = min(max(y, 0.0), map_size[1] - 1e-5)
+            
+            pos.append([x, y])
+            concentration.append(img_coarse[row, col])
+            
+    # No peaks found. Fallback to importance sampling.
+    else:
+        weights = img_coarse.flatten()
+        sum_weights = np.sum(weights)
         
-        x, y = cell2xy((row, col), coarse_cell_size)
-        
-        x = min(max(x, 0.0), map_size[0] - 1e-5)
-        y = min(max(y, 0.0), map_size[1] - 1e-5)
-
-        val = img_coarse[row, col]
-        pos.append([x, y])
-        concentration.append(val)
-        
-    # Fill until num_gaussians
-    if num_gaussians:
-        while len(pos) < num_gaussians:
-            pos.append([
-                np.random.uniform(0, map_size[0]), # Width
-                np.random.uniform(0, map_size[1])  # Height
-            ])
-            concentration.append(0.1)
+        if sum_weights > 1e-6:
+            # Importance Sampling based on the coarse map density
+            probabilities = weights / sum_weights
+            sampled_indices = np.random.choice(
+                a=len(probabilities), 
+                size=min_gaussians, 
+                replace=True, 
+                p=probabilities
+            )
+            rows, cols = np.unravel_index(sampled_indices, img_coarse.shape)
+            
+            for r, c in zip(rows, cols):
+                x, y = cell2xy((r, c), coarse_cell_size)
+                x = min(max(x, 0.0), map_size[0] - 1e-5)
+                y = min(max(y, 0.0), map_size[1] - 1e-5)
+                
+                pos.append([x, y])
+                concentration.append(img_coarse[r, c] + 0.01) # Small offset
+        else:
+            # Map is completely empty (all zeros)
+            for _ in range(min_gaussians):
+                pos.append([
+                    np.random.uniform(0, map_size[0]), 
+                    np.random.uniform(0, map_size[1])
+                ])
+                concentration.append(0.01)
 
     std = coarse_cell_size * 1.5 
 
@@ -93,7 +114,7 @@ def setup_gs_model(sim_data: SimulationData, cfg: Config):
         sim_data.beams.tolist(), 
         sim_data.measurements, 
         cfg.sim.map_size, 
-        num_gaussians=cfg.init.initial_gaussians,
+        min_gaussians=cfg.init.min_gaussians,
         coarse_cell_size=coarse_cell_size
     )
     initial_gaussians = init_pos.shape[0]
