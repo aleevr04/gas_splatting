@@ -197,7 +197,7 @@ class Trainer:
             
             y_pred = self.model(sim_data.beams)
 
-            l1_loss = F.l1_loss(y_pred, sim_data.y_true)
+            l1_loss = F.l1_loss(y_pred, sim_data.measurements)
 
             total_loss = l1_loss
             

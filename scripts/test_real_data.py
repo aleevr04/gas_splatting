@@ -3,6 +3,7 @@ import sys
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
 from simple_parsing import ArgumentParser
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -12,6 +13,7 @@ from trainer import Trainer
 from utils.init_utils import setup_gs_model
 from utils.plot_utils import render_gaussian_map, plot_initial_guess, set_publication_style
 from utils.data_utils import load_real_tdlas_data
+from utils.sim_utils import xy2cell, simulate_gas_integrals, generate_radial_beams, generate_random_beams
 
 def plot_real_results(model, sim_data, results, cfg, save_path):
     img_pred = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
@@ -54,7 +56,6 @@ def plot_real_results(model, sim_data, results, cfg, save_path):
     print(f"\n[+] Real data results plot saved in: {save_path}")
     plt.close(fig)
 
-
 def main():
     parser = ArgumentParser(description="Real data training")
     parser.add_arguments(Config, dest="cfg")
@@ -68,33 +69,43 @@ def main():
     # Load data
     data_path = os.path.join(os.path.dirname(__file__), '..', 'ground_truth', 'real_data', '1_1.json') 
     print(f"Loading real data from {data_path}...")
-    sim_data = load_real_tdlas_data(data_path)
+    sim_data = load_real_tdlas_data(data_path, cfg)
+    print(f"Map size: {cfg.sim.map_size[0]}m x {cfg.sim.map_size[1]}m")
+
+    # ------ INJECT ARTIFICIAL TEST DATA ------
+    # Simulate beams
+    beams = []
+    num_random_beams = cfg.sim.num_beams // 2
+    num_radial_beams = cfg.sim.num_beams - num_random_beams 
     
-    # Map boundaries based on beams geometry
-    all_coordinates = sim_data.beams.view(-1, 2)
-    min_coords = torch.min(all_coordinates, dim=0).values
-    max_coords = torch.max(all_coordinates, dim=0).values
+    beams += generate_random_beams(cfg.sim.map_size, num_random_beams)
+    beams += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
 
-    margin = 0.5
-    min_x, min_y = min_coords[0].item() - margin, min_coords[1].item() - margin
-    max_x, max_y = max_coords[0].item() + margin, max_coords[1].item() + margin
+    # Place artificial sources
+    source1 = (5.0, 7.0)
+    source2 = (11.0, 4.0)
 
-    # Apply offset to beams
-    offset = torch.tensor([-min_x, -min_y], device=cfg.device)
-    sim_data.beams += offset
+    s1r, s1c = xy2cell(source1, cfg.sim.cell_size)
+    s2r, s2c = xy2cell(source2, cfg.sim.cell_size)
 
-    # New map size
-    map_w = max_x - min_x
-    map_h = max_y - min_y
-    cfg.sim.map_size = (map_w, map_h)
-    
-    print(f"Computed map size: {map_w:.2f}m x {map_h:.2f}m")
-    print(f"Total beams: {sim_data.beams.shape[0]}")
-
-    # Empty GT
     grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
     grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
-    sim_data.img_gt = np.zeros((grid_h, grid_w))
+    gas_map = np.zeros((grid_h, grid_w))
+
+    gas_map[s1r][s1c] = 60.0
+    gas_map[s2r][s2c] = 60.0
+
+    gas_map = gaussian_filter(gas_map, sigma=1.5)
+
+    # Recompute integral measurements
+    measurements = simulate_gas_integrals(gas_map, beams, cfg.sim.cell_size)
+    
+    # Update simulation data object
+    sim_data.img_gt = gas_map
+    sim_data.beams = torch.tensor(beams, dtype=torch.float32, device=cfg.device)
+    sim_data.measurements = torch.tensor(measurements, dtype=torch.float32, device=cfg.device)
+    sim_data.y_true = sim_data.measurements
+    # ------------------------------------
 
     # Training
     model, init_pos, img_coarse = setup_gs_model(sim_data, cfg)

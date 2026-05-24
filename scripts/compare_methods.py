@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
+from utils.data_utils import load_real_tdlas_data
 from utils.plot_utils import set_publication_style
 from utils.methods_registry import AVAILABLE_METHODS
 
@@ -25,7 +26,11 @@ def main():
     
     # --- Simulation data ---
     print(f"--- Generating Simulation Data ---")
-    sim_data = generate_simulation_data(cfg)
+    #sim_data = generate_simulation_data(cfg)
+    data_path = os.path.join(os.path.dirname(__file__), '..', 'ground_truth', 'real_data', '1_1.json') 
+    print(f"Loading real data from {data_path}...")
+    sim_data = load_real_tdlas_data(data_path, cfg)
+    
     measurements = sim_data.measurements.cpu().numpy()
     gt_img = sim_data.img_gt
     
