@@ -77,7 +77,7 @@ def main():
     set_publication_style()
 
     # Slightly reduced figure size so relative font size appears larger when scaled in LaTeX
-    fig = plt.figure(figsize=(14, 8))
+    fig = plt.figure(figsize=(10, 6))
     gs = fig.add_gridspec(2, 4, height_ratios=[1, 1.2]) # Give slightly more vertical room to the line plot
 
     # Panel 1: Original
@@ -97,7 +97,6 @@ def main():
     ax_err = fig.add_subplot(gs[1, :])
     # Increased line width and marker size for visibility
     ax_err.plot(c_values, errors, 'b-', linewidth=3.0, marker='o', markersize=6)
-    ax_err.set_title("Reconstruction Error (RMSE) vs. Displacement Factor (c)", pad=15)
     ax_err.set_xlabel("Factor 'c' (Displacement proportion along the major axis)")
     ax_err.set_ylabel("RMSE")
     ax_err.grid(True, linestyle='--', alpha=0.7, linewidth=1.0)
