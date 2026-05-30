@@ -120,7 +120,6 @@ def main():
     resolutions = [20, 30, 40, 60, 80]
 
     num_seeds = 30
-    np.random.seed(42)
     seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
     # Pull methods directly from the central registry
