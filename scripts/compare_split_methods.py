@@ -86,17 +86,17 @@ def evaluate_single_seed(seed, base_cfg, methods):
 
 def plot_split_comparison(methods, results, save_path):
     """
-    Generates a 1x4 bar chart to compare A/B testing methods directly.
+    Generates a 2x2 bar chart to compare A/B testing methods directly.
     """
-    plt.rcParams.update({'font.size': 12})
-    fig, axes = plt.subplots(1, 4, figsize=(22, 6))
-    fig.suptitle("Splitting Methods Comparison (Averaged across seeds)", fontsize=16, y=1.05)
+    fig, axes = plt.subplots(2, 2, figsize=(6, 6)) 
+    
+    axes = axes.flatten() 
 
     metrics = [
-        {"key": "rmse", "title": "RMSE", "ylabel": "RMSE vs Ground Truth", "ax": axes[0], "color": "skyblue"},
-        {"key": "ssim", "title": "SSIM", "ylabel": "Structural Similarity", "ax": axes[1], "color": "lightgreen"},
-        {"key": "gaussians", "title": "Final Gaussians", "ylabel": "Number of Splats", "ax": axes[2], "color": "salmon"},
-        {"key": "time", "title": "Total Time", "ylabel": "Seconds", "ax": axes[3], "color": "mediumpurple"}
+        {"key": "rmse", "title": "RMSE", "ax": axes[0], "color": "skyblue"},
+        {"key": "ssim", "title": "SSIM", "ax": axes[1], "color": "lightgreen"},
+        {"key": "gaussians", "title": "Number of Gaussians", "ax": axes[2], "color": "salmon"},
+        {"key": "time", "title": "Total Time (s)", "ax": axes[3], "color": "mediumpurple"}
     ]
 
     x_pos = np.arange(len(methods))
@@ -109,7 +109,6 @@ def plot_split_comparison(methods, results, save_path):
         bars = ax.bar(x_pos, means, yerr=stds, align='center', alpha=0.8, color=metric["color"], capsize=10, edgecolor='black')
         
         ax.set_title(metric["title"], pad=15)
-        ax.set_ylabel(metric["ylabel"])
         ax.set_xticks(x_pos)
         ax.set_xticklabels(methods)
         ax.yaxis.grid(True, linestyle='--', alpha=0.7)
@@ -118,11 +117,13 @@ def plot_split_comparison(methods, results, save_path):
         # Add values on top of the bars
         for bar in bars:
             yval = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.02 * max(means), f'{yval:.3f}' if "rmse" in metric["key"] or "ssim" in metric["key"] else f'{yval:.1f}', ha='center', va='bottom', fontsize=11)
+            ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.02 * max(means), 
+                    f'{yval:.3f}' if "rmse" in metric["key"] or "ssim" in metric["key"] else f'{yval:.1f}', 
+                    ha='center', va='bottom')
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path)
     print(f"\n[+] Comparison plot saved in: {save_path}")
     plt.close(fig)
 
@@ -133,8 +134,7 @@ def main():
     cfg: Config = args.cfg
     
     # Generate random reproducible seeds for rigorous testing
-    num_seeds = 15
-    np.random.seed(42)
+    num_seeds = 30
     seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
     
     methods = ["Original Split", "Long-Axis Split"]

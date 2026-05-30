@@ -212,75 +212,106 @@ class GasSplattingModel(nn.Module):
         self._scale = optimizable_tensors["scale"]
         self._rotation = optimizable_tensors["rotation"]
 
-    def split(self, optimizer: torch.optim.Optimizer, mask, N=2):
-        if hasattr(self.densify_cfg, 'long_axis_split') and self.densify_cfg.long_axis_split:
-            # --- MASS-CONSERVING LONG-AXIS SPLIT ---
-            N = 2
-            
-            pos = self.get_pos()[mask]
-            scales = self.get_scale()[mask]
-            rots = self.get_rotation_matrix()[mask]
-            concs = self.get_concentration()[mask]
-            
-            # Determine longest axis
-            max_axis_idx = torch.argmax(scales, dim=1)
-            idx = torch.arange(scales.size(0))
-            
-            # Shift new positions using a factor c
-            c = 0.5
-            shift_local = torch.zeros_like(scales)
-            shift_local[idx, max_axis_idx] = c * scales[idx, max_axis_idx]
-            
-            # Transform local shifts to the global coordinate system
-            shift_global = torch.bmm(rots, shift_local.unsqueeze(-1)).squeeze(-1)
-            
-            new_pos = torch.cat([
-                pos + shift_global,
-                pos - shift_global
-            ], dim=0)
-            
-            new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
-            new_pos = torch.min(new_pos, self.map_size - 1e-5)
-            new_pos = inverse_sigmoid(new_pos, self.map_size)
-            
-            # Mass Conservation (Scales). Minor scale stays untouched
-            new_scales = scales.clone()
-            new_scales[idx, max_axis_idx] *= math.sqrt(1 - c**2)
-            
-            new_scale = torch.log(torch.cat([new_scales, new_scales], dim=0))
-            
-            # Mass Conservation (Concentration)
-            new_concs = concs / (2.0 * math.sqrt(1 - c**2))
-            new_concentration = inverse_softplus(torch.cat([new_concs, new_concs], dim=0))
-            
-            new_rotation = self._rotation[mask].repeat(N)
-            
-        else:
-            # --- ORIGINAL SPLIT ---
-            # Generate new positions based on original gaussian functions
-            stds = self.get_scale()[mask].repeat(N, 1)
-            means = torch.zeros((stds.size(0), 2), device=stds.device)
-            samples = torch.normal(mean=means, std=stds)
+    def split_original(self, optimizer: torch.optim.Optimizer, mask, N=2):
+        """
+        --- ORIGINAL SPLIT ---
+        New gaussians' positions are samples of the original one.
+        Scale is reduced by 0.8 * N.
+        Concentration is divided by N.
+        """
+        stds = self.get_scale()[mask].repeat(N, 1)
+        means = torch.zeros((stds.size(0), 2), device=stds.device)
+        samples = torch.normal(mean=means, std=stds)
 
-            # Transform to global coordinate system
-            rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
-            new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
+        # Transform to global coordinate system
+        rots = self.get_rotation_matrix()[mask].repeat(N, 1, 1)
+        new_pos = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_pos()[mask].repeat(N, 1)
 
-            # Avoid invalid positions and transform to parameter's space
-            new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
-            new_pos = torch.min(new_pos, self.map_size - 1e-5)
-            new_pos = inverse_sigmoid(new_pos, self.map_size)
+        # Avoid invalid positions and transform to parameter's space
+        new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
+        new_pos = torch.min(new_pos, self.map_size - 1e-5)
+        new_pos = inverse_sigmoid(new_pos, self.map_size)
 
-            # Divide original concentration by N
-            new_concentration = inverse_softplus(
-                self.get_concentration()[mask].repeat(N) * (1 / N)
+        # Divide original concentration by N
+        new_concentration = inverse_softplus(
+            self.get_concentration()[mask].repeat(N) * (1 / N)
+        )
+
+        # Divide original scale by a factor of 0.8 * N
+        new_scale = self._scale[mask].repeat(N, 1) - math.log(0.8 * N)
+
+        new_rotation = self._rotation[mask].repeat(N)
+
+        tensors_dict = {
+            "pos": new_pos,
+            "concentration": new_concentration,
+            "scale": new_scale,
+            "rotation": new_rotation
+        }
+
+        # Add new gaussians' parameters
+        self._cat_tensors_to_optimizer(optimizer, tensors_dict)
+
+        # Prune original gaussians
+        prune_mask = torch.cat(
+            (
+                mask,
+                torch.zeros(N * mask.sum(), dtype=torch.bool, device=mask.device)
             )
+        )
+        self.prune(optimizer, prune_mask)
 
-            # Divide original scale by a factor of 0.8 * N
-            new_scale = self._scale[mask].repeat(N, 1) - math.log(0.8 * N)
-
-            new_rotation = self._rotation[mask].repeat(N)
-
+    def split_long_axis(self, optimizer: torch.optim.Optimizer, mask):
+        """
+        --- Long-Axis Split ---
+        Places new gaussians symmetrically along the longest axis.
+        Concentration and scale are computed dynamically to preserve variation and mass.
+        """
+        N = 2
+        
+        pos = self.get_pos()[mask]
+        scales = self.get_scale()[mask]
+        rots = self.get_rotation_matrix()[mask]
+        concs = self.get_concentration()[mask]
+        
+        # Determine max and min axis scales
+        s_max, max_axis_idx = torch.max(scales, dim=1)
+        s_min, min_axis_idx = torch.min(scales, dim=1)
+        s_min = torch.clamp(s_min, min=1e-5) # Prevent division by zero
+        
+        c = torch.full_like(s_max, fill_value=0.5) 
+        
+        idx = torch.arange(scales.size(0))
+        
+        # Shift new positions using the calculated c along the longest axis
+        shift_local = torch.zeros_like(scales)
+        shift_local[idx, max_axis_idx] = c * s_max
+        
+        # Transform local shifts to the global coordinate system
+        shift_global = torch.bmm(rots, shift_local.unsqueeze(-1)).squeeze(-1)
+        
+        new_pos = torch.cat([
+            pos + shift_global,
+            pos - shift_global
+        ], dim=0)
+        
+        new_pos = torch.max(new_pos, torch.tensor(1e-5, device=new_pos.device))
+        new_pos = torch.min(new_pos, self.map_size - 1e-5)
+        new_pos = inverse_sigmoid(new_pos, self.map_size)
+        
+        # Mass Conservation (Scales). Minor scale stays untouched
+        new_scales = scales.clone()
+        c_tensor_sqrt = torch.sqrt(1 - c**2)
+        new_scales[idx, max_axis_idx] *= c_tensor_sqrt
+        
+        new_scale = torch.log(torch.cat([new_scales, new_scales], dim=0))
+        
+        # Mass Conservation (Concentration)
+        new_concs = concs / (2.0 * c_tensor_sqrt)
+        new_concentration = inverse_softplus(torch.cat([new_concs, new_concs], dim=0))
+        
+        new_rotation = self._rotation[mask].repeat(N)
+        
         tensors_dict = {
             "pos": new_pos,
             "concentration": new_concentration,
@@ -302,36 +333,57 @@ class GasSplattingModel(nn.Module):
 
     def densify_and_prune(self, optimizer: torch.optim.Optimizer):
         # Gaussians with high gradient
-        grads = (self.pos_grad_accum / self.denom).squeeze() # Average pos gradient
+        grads = (self.pos_grad_accum / self.denom).squeeze(1) # Average pos gradient
         grads[grads.isnan()] = 0.0
         grad_mask = grads > self.densify_cfg.gradient_threshold
 
-        # Gaussians with small scale
-        adjusted_scales = self.get_scale() / torch.max(self.map_size)
-        small_scale_mask = torch.max(adjusted_scales, dim=1).values < self.densify_cfg.scale_threshold
+        use_long_axis = hasattr(self.densify_cfg, 'long_axis_split') and self.densify_cfg.long_axis_split
 
-        # --- Clone ---
-        clone_mask = torch.logical_and(grad_mask, small_scale_mask)
-        num_clones = int(clone_mask.sum().item())
-        self.clone(optimizer, clone_mask)
-        self.clones += num_clones
+        num_clones = 0
+        num_splits = 0
 
-        # --- Split ---
-        split_mask = torch.logical_and(grad_mask, ~small_scale_mask)
+        if use_long_axis:
+            # --- UNIFIED DENSIFICATION (Long-Axis Split + Clone) ---
+            # We don't use small_scale_mask. Every Gaussian with high gradient
+            # undergoes the unified operation
+            num_splits = int(grad_mask.sum().item())
+            
+            if num_splits > 0:
+                self.split_long_axis(optimizer, grad_mask)
+                self.splits += num_splits
+                
+        else:
+            # --- TRADITIONAL DENSIFICATION ---
+            # Gaussians with small scale
+            adjusted_scales = self.get_scale() / torch.max(self.map_size)
+            small_scale_mask = torch.max(adjusted_scales, dim=1).values < self.densify_cfg.scale_threshold
 
-        # Number of gaussians may have changed
-        if num_clones > 0:
-            padding = torch.zeros(num_clones, dtype=torch.bool, device=split_mask.device)
-            split_mask = torch.cat([split_mask, padding])
+            # Clone
+            clone_mask = torch.logical_and(grad_mask, small_scale_mask)
+            num_clones = int(clone_mask.sum().item())
+            
+            if num_clones > 0:
+                self.clone(optimizer, clone_mask)
+                self.clones += num_clones
 
-        num_splits = int(split_mask.sum().item())
-        self.split(optimizer, split_mask)
-        self.splits += num_splits
+            # Split
+            split_mask = torch.logical_and(grad_mask, ~small_scale_mask)
+
+            # Number of gaussians may have changed due to previous clone operation
+            if num_clones > 0:
+                padding = torch.zeros(num_clones, dtype=torch.bool, device=split_mask.device)
+                split_mask = torch.cat([split_mask, padding])
+
+            num_splits = int(split_mask.sum().item())
+            
+            if num_splits > 0:
+                self.split_original(optimizer, split_mask)
+                self.splits += num_splits
 
         # --- Prune ---
         num_prunes = 0
         if self.num_gaussians > 1:
-            prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).squeeze()
+            prune_mask = (self.get_concentration() < self.densify_cfg.prune_threshold).view(-1)
             num_prunes = int(prune_mask.sum().item())
             self.prune(optimizer, prune_mask)
 
