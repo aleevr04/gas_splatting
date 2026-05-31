@@ -37,8 +37,8 @@ class GasSplattingModel(nn.Module):
 
         Args:
             pos (Tensor (K, 2)): Initial positions (x, y) in map coordinates.
-            concentration (Tensor (K,) or float): Initial concentration/weight per gaussian.
-            std (float or Tensor): Initial standard deviation (scalar, (K,) or (K,2)).
+            concentration (Tensor (0,) or (K,)): Initial concentration/weight per gaussian.
+            std (Tensor (0,), (K,) or (K, 2)): Initial standard deviation.
         """
 
         with torch.no_grad():

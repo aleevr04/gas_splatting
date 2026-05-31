@@ -5,11 +5,18 @@ import datetime
 import math
 import torch
 import numpy as np
+from scipy.ndimage import gaussian_filter
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
-from utils.sim_utils import SimulationData
+from utils.sim_utils import (
+    SimulationData, 
+    xy2cell, 
+    simulate_gas_integrals, 
+    generate_random_beams, 
+    generate_radial_beams
+)
 
 def save_experiment_results(metadata, results, folder="results"):
     """
@@ -34,7 +41,7 @@ def save_experiment_results(metadata, results, folder="results"):
     print(f"Experiment results saved in: {filepath}")
     return filepath
 
-def load_real_tdlas_data(filepath, cfg: Config):
+def load_real_tdlas_data(filepath, cfg: Config) -> SimulationData:
     """
     Extracts real simulation data from a given file. It also updates config map size properly.
     """
@@ -101,3 +108,56 @@ def load_real_tdlas_data(filepath, cfg: Config):
         measurements=measurements_tensor,
         y_true=measurements_tensor
     )
+
+def build_custom_real_scenario(
+    cfg: Config, 
+    real_data_path: str, 
+    use_real_geometry: bool = True, 
+    inject_simulated_gas: bool = False
+) -> SimulationData:
+    
+    if not use_real_geometry and not inject_simulated_gas:
+        raise ValueError(
+            "Invalid combination: Synthetic beams require a simulated gas map to compute meaningful measurements."
+        )
+
+    # Load real data
+    if os.path.exists(real_data_path):
+        sim_data = load_real_tdlas_data(real_data_path, cfg)
+    else:
+        raise FileNotFoundError(f"Real data path is missing or invalid: {real_data_path}")
+
+    if not use_real_geometry:
+        num_random_beams = cfg.sim.num_beams // 2
+        num_radial_beams = cfg.sim.num_beams - num_random_beams 
+        beams = []
+        beams += generate_random_beams(cfg.sim.map_size, num_random_beams)
+        beams += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
+        
+        sim_data.beams = torch.tensor(beams, dtype=torch.float32, device=cfg.device)
+
+    if inject_simulated_gas:
+        grid_h, grid_w = sim_data.img_gt.shape
+        gas_map = np.zeros((grid_h, grid_w))
+
+        source1 = (5.0, 7.0)
+        source2 = (11.0, 4.0)
+
+        s1r, s1c = xy2cell(source1, cfg.sim.cell_size)
+        s2r, s2c = xy2cell(source2, cfg.sim.cell_size)
+
+        if 0 <= s1r < grid_h and 0 <= s1c < grid_w:
+            gas_map[s1r][s1c] = 60.0
+        if 0 <= s2r < grid_h and 0 <= s2c < grid_w:
+            gas_map[s2r][s2c] = 60.0
+
+        gas_map = gaussian_filter(gas_map, sigma=1.5)
+        
+        # Recompute measurements
+        measurements = simulate_gas_integrals(gas_map, sim_data.beams.tolist(), cfg.sim.cell_size)
+        
+        sim_data.img_gt = gas_map
+        sim_data.measurements = torch.tensor(measurements, dtype=torch.float32, device=cfg.device)
+        sim_data.y_true = sim_data.measurements
+
+    return sim_data
