@@ -49,7 +49,7 @@ def plot_real_results(model, sim_data, results, cfg, save_path):
     max_alpha = 0.3 
     alphas = min_alpha + meas_norm * (max_alpha - min_alpha)
     
-    step = 3 
+    step = 1 
     for i in range(0, len(beams_np), step):
         (x0, y0), (x1, y1) = beams_np[i]
         ax_map.plot([x0, x1], [y0, y1], color='white', alpha=float(alphas[i]), linewidth=1.0)
@@ -71,6 +71,9 @@ def plot_real_results(model, sim_data, results, cfg, save_path):
 def main():
     parser = ArgumentParser(description="Real data training")
     parser.add_arguments(Config, dest="cfg")
+    parser.add_argument('--sim_beams', dest='sim_beams', action='store_true', default=False, help="Use the same beams' geometry as in simulated environments (radial and random beams). If this option is set, simulated sources must be used aswell.")
+    parser.add_argument('--sim_gas', dest='sim_gas', action='store_true', default=False, help='Inject simulated sources in the environment.')
+    parser.add_argument('--force_init', dest='force_init', action='store_true', default=False, help="Force model initialization and place one Gaussian at each simulated gas source.")
     args = parser.parse_args()
     cfg: Config = args.cfg
 
@@ -79,32 +82,33 @@ def main():
     print(f"Using device: {cfg.device}")
     
     # Load data
-    data_path = os.path.join(os.path.dirname(__file__), '..', 'ground_truth', 'real_data', '1_1.json') 
+    data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json')
     
     sim_data = build_custom_real_scenario(
         cfg=cfg,
         real_data_path=data_path,
-        use_real_geometry=True,
-        inject_simulated_gas=True
+        use_sim_beams=args.sim_beams,
+        use_sim_gas=args.sim_gas
     )
 
     # ----- MODEL INITIALIZATION AND TRAINING ------
-    # # LQSR Initialization
-    # model, init_pos, img_coarse = setup_gs_model(sim_data, cfg)
-    # print(f"Model initialized with {model.num_gaussians} gaussians.")
-    # plot_initial_guess(sim_data.img_gt, img_coarse, init_pos, cfg)
-
-    # Manual Initialization
-    init_pos = np.array([[5.0, 7.0], [11.0, 4.0]])
-    model = GasSplattingModel(initial_gaussians=2, cfg=cfg)
-    model.initialize_gaussians(
-        pos=torch.tensor(init_pos, device=cfg.device),
-        concentration=torch.tensor(60.0),
-        std=torch.tensor(1.0)
-    )
-    grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
-    grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-    plot_initial_guess(sim_data.img_gt, np.zeros((grid_h, grid_w)), init_pos,cfg)
+    if args.force_init:
+        # Forced Initialization
+        init_pos = np.array([[5.0, 7.0], [9.0, 4.0]])
+        model = GasSplattingModel(initial_gaussians=2, cfg=cfg)
+        model.initialize_gaussians(
+            pos=torch.tensor(init_pos, device=cfg.device),
+            concentration=torch.tensor(10.0),
+            std=torch.tensor(1.0)
+        )
+        grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+        grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
+        plot_initial_guess(sim_data.img_gt, np.zeros((grid_h, grid_w)), init_pos,cfg)
+    else:
+        # LQSR Initialization
+        model, init_pos, img_coarse = setup_gs_model(sim_data, cfg)
+        print(f"Model initialized with {model.num_gaussians} gaussians.")
+        plot_initial_guess(sim_data.img_gt, img_coarse, init_pos, cfg)
 
     # Training
     trainer = Trainer(model, cfg)

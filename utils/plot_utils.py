@@ -86,7 +86,7 @@ def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
     ax2 = plt.subplot(1, 2, 2)
     ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
     ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
-    ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=50, linewidths=1.2, label='Peaks')
+    ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Peaks')
     ax2.legend()
 
     fig.colorbar(im1, ax=[ax1, ax2], label="ppm", fraction=0.025, pad=0.05)

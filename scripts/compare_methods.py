@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
+from utils.data_utils import build_custom_real_scenario
 from utils.plot_utils import set_publication_style
 from utils.methods_registry import AVAILABLE_METHODS
 
@@ -18,6 +19,9 @@ def main():
     # --- Configuration ---
     parser = ArgumentParser(description="Compare visually Gas Splatting vs Traditional Methods")
     parser.add_arguments(dataclass=Config, dest="cfg")
+    parser.add_argument('--real_scenario', dest='real_scenario', action='store_true', default=False, help="Use a real scenario instead of a simulated one.")
+    parser.add_argument('--sim_beams', dest='sim_beams', action='store_true', default=False, help="Use the same beams' geometry as in simulated environments (radial and random beams). If this option is set, simulated sources must be used aswell.")
+    parser.add_argument('--sim_gas', dest='sim_gas', action='store_true', default=False, help='Inject simulated sources in the environment.')
     args = parser.parse_args()
     cfg: Config = args.cfg
 
@@ -25,7 +29,16 @@ def main():
     
     # --- Simulation data ---
     print(f"--- Generating Simulation Data ---")
-    sim_data = generate_simulation_data(cfg)
+    if args.real_scenario:
+        data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json')
+        sim_data = build_custom_real_scenario(
+            real_data_path=data_path,
+            cfg=cfg,
+            use_sim_beams=args.sim_beams,
+            use_sim_gas=args.sim_gas
+        )
+    else:
+        sim_data = generate_simulation_data(cfg)
     
     measurements = sim_data.measurements.cpu().numpy()
     gt_img = sim_data.img_gt
@@ -85,7 +98,7 @@ def main():
     # Overlay beams on Ground Truth
     for i in range(0, len(sim_data.beams)):
         (x0, y0), (x1, y1) = sim_data.beams[i]
-        axes[0].plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
+        axes[0].plot([x0, x1], [y0, y1], 'w-', alpha=0.1, linewidth=0.5)
     
     # Plot method reconstructions
     data_range = gt_img.max() - gt_img.min()

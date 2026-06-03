@@ -112,11 +112,11 @@ def load_real_tdlas_data(filepath, cfg: Config) -> SimulationData:
 def build_custom_real_scenario(
     cfg: Config, 
     real_data_path: str, 
-    use_real_geometry: bool = True, 
-    inject_simulated_gas: bool = False
+    use_sim_beams: bool = True, 
+    use_sim_gas: bool = False
 ) -> SimulationData:
     
-    if not use_real_geometry and not inject_simulated_gas:
+    if use_sim_beams and not use_sim_gas:
         raise ValueError(
             "Invalid combination: Synthetic beams require a simulated gas map to compute meaningful measurements."
         )
@@ -127,7 +127,7 @@ def build_custom_real_scenario(
     else:
         raise FileNotFoundError(f"Real data path is missing or invalid: {real_data_path}")
 
-    if not use_real_geometry:
+    if use_sim_beams:
         num_random_beams = cfg.sim.num_beams // 2
         num_radial_beams = cfg.sim.num_beams - num_random_beams 
         beams = []
@@ -136,12 +136,12 @@ def build_custom_real_scenario(
         
         sim_data.beams = torch.tensor(beams, dtype=torch.float32, device=cfg.device)
 
-    if inject_simulated_gas:
+    if use_sim_gas:
         grid_h, grid_w = sim_data.img_gt.shape
         gas_map = np.zeros((grid_h, grid_w))
 
         source1 = (5.0, 7.0)
-        source2 = (11.0, 4.0)
+        source2 = (9.0, 4.0)
 
         s1r, s1c = xy2cell(source1, cfg.sim.cell_size)
         s2r, s2c = xy2cell(source2, cfg.sim.cell_size)
@@ -151,7 +151,7 @@ def build_custom_real_scenario(
         if 0 <= s2r < grid_h and 0 <= s2c < grid_w:
             gas_map[s2r][s2c] = 60.0
 
-        gas_map = gaussian_filter(gas_map, sigma=1.5)
+        gas_map = gaussian_filter(gas_map, sigma=1.0)
         
         # Recompute measurements
         measurements = simulate_gas_integrals(gas_map, sim_data.beams.tolist(), cfg.sim.cell_size)
