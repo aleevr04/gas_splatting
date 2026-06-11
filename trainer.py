@@ -4,8 +4,11 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from PIL import Image
 import numpy as np
+import pyqtgraph as pg
+import pyqtgraph.exporters
+import imageio.v3 as iio
+from pyqtgraph.Qt import QtWidgets, QtCore
 from tqdm import tqdm
 from dataclasses import dataclass, field
 from typing import List, Dict
@@ -24,98 +27,183 @@ class TrainingResults:
 
 class LiveVisualizer:
     def __init__(self, map_size):
-        # Interactive mode
-        plt.ion()
-        self.fig, (self.ax_loss, self.ax_map) = plt.subplots(1, 2, figsize=(12, 5))
-        self.fig.suptitle("Real-time Gas Splatting Training")
+        self.app = QtWidgets.QApplication.instance()
+        if self.app is None:
+            self.app = QtWidgets.QApplication([])
+            
+        # [FIX] Tell VSCode/Pylance that this is definitely a QApplication
+        assert isinstance(self.app, QtWidgets.QApplication)
 
-        # Loss History
-        self.ax_loss.set_title("Loss History")
-        self.ax_loss.set_xlabel("Iteration")
-        self.ax_loss.set_ylabel("Total Loss")
-        self.ax_loss.set_yscale('log')
-        self.loss_line, = self.ax_loss.plot([], [], 'b-', alpha=0.8)
+        # --- GLOBAL STYLES (Modern Bright Theme) ---
+        pg.setConfigOption('background', '#f3f4f6') # Soft light gray background
+        pg.setConfigOption('foreground', '#374151') # Dark slate for axes and labels
+        pg.setConfigOptions(antialias=True) 
 
-        # Gaussians
-        self.ax_map.set_title("Gaussians' positions")
-        self.ax_map.set_xlim(0, map_size[0])
-        self.ax_map.set_ylim(0, map_size[1])
-        self.ax_map.set_aspect('equal')
-        self.ax_map.grid(True, linestyle='--', alpha=0.5)
+        font = self.app.font()
+        font.setPointSize(12) 
+        self.app.setFont(font)
+
+        # --- WINDOW ---
+        self.win = pg.GraphicsLayoutWidget(show=True, title="Real-time Gas Splatting")
+        screen_rect = self.app.primaryScreen().availableGeometry()
+
+        # 1. Start with a target height (e.g., 85% of your screen)
+        target_height = int(screen_rect.height() * 0.85)
+
+        # 2. Calculate the aspect ratio of your map (Width / Height)
+        map_aspect_ratio = map_size[0] / map_size[1]
+
+        # 3. Calculate ideal width
+        # The top row has TWO maps side-by-side. 
+        # Let's assume the top row takes up about 60% of the total window height.
+        top_row_height = target_height * 0.6
         
-        # Point size depends on gaussian concentration
-        self.scatter = self.ax_map.scatter([], [], c='red', alpha=0.6, edgecolors='k')
+        # Width = 2 plots * (plot height * map aspect ratio)
+        ideal_width = int(2 * (top_row_height * map_aspect_ratio))
+
+        # Add a 100px buffer for the y-axis text, labels, and internal grid margins
+        final_width = ideal_width + 100 
+        final_height = target_height
+
+        # 4. Apply a sensible minimum limit so it doesn't crush on tiny maps
+        min_width, min_height = 800, 600
+        final_width = max(final_width, min_width)
+        final_height = max(final_height, min_height)
+
+        self.win.setMinimumSize(min_width, min_height)
+        self.win.resize(final_width, final_height)
+
+        # 5. Center the window on the screen
+        x_pos = (screen_rect.width() - final_width) // 2
+        y_pos = (screen_rect.height() - final_height) // 2
+        self.win.move(x_pos, y_pos)
+
+        # ---------------------------------------------------
+        # ROW 0, COL 0: Gaussians' positions (Scatter)
+        # ---------------------------------------------------
+        self.p_map = self.win.addPlot(row=0, col=0)
+        self.p_map.setTitle("Gaussians' positions", size='16pt', color='#111827')
+        self.p_map.setXRange(0, map_size[0], padding=0)
+        self.p_map.setYRange(0, map_size[1], padding=0)
+        self.p_map.setAspectLocked(True)
+        self.p_map.showGrid(x=True, y=True, alpha=0.15) # Softer grid for bright theme
         
-        # Informative text
-        self.text_info = self.ax_map.text(0.05, 0.95, '', transform=self.ax_map.transAxes, 
-                                          verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        self.scatter = pg.ScatterPlotItem(
+            pen=pg.mkPen(None), 
+            brush=pg.mkBrush(239, 68, 68, 200) # Vibrant coral/red
+        )
+        self.p_map.addItem(self.scatter)
 
-        plt.tight_layout()
-        plt.show(block=False)
+        # Updated text overlay for light theme
+        self.text_item = pg.TextItem(text="", color='#111827', fill=pg.mkBrush(255, 255, 255, 200))
+        text_font = self.text_item.textItem.font()
+        text_font.setPointSize(13)
+        text_font.setBold(True)
+        self.text_item.setFont(text_font)
+        self.p_map.addItem(self.text_item)
+        self.text_item.setPos(map_size[0] * 0.05, map_size[1] * 0.95)
 
-        self.temp_dir = "plots/temp_frames"
-        os.makedirs(self.temp_dir, exist_ok=True)
-        self.frame_paths = []
-
-    def update(self, iteration, loss_history, pos_tensor, concentration_tensor):
-        # update loss
-        x_data = list(range(len(loss_history)))
-        self.loss_line.set_data(x_data, loss_history)
+        # ---------------------------------------------------
+        # ROW 0, COL 1: Estimated Gas Map (ImageItem)
+        # ---------------------------------------------------
+        self.p_render = self.win.addPlot(row=0, col=1)
+        self.p_render.setTitle("Estimated Gas Map", size='16pt', color='#111827')
+        self.p_render.setXRange(0, map_size[0])
+        self.p_render.setYRange(0, map_size[1])
+        self.p_render.setAspectLocked(True)
         
-        # Readjust loss axes
-        self.ax_loss.set_xlim(0, max(100, iteration + 10))
+        self.img_item = pg.ImageItem()
+        # 'plasma' or 'magma' look fantastic and vivid on bright backgrounds
+        colormap = pg.colormap.get('plasma') 
+        self.img_item.setColorMap(colormap)
+        self.p_render.addItem(self.img_item)
+
+        self.img_item.setRect(QtCore.QRectF(0, 0, map_size[0], map_size[1]))
+
+        # ---------------------------------------------------
+        # ROW 1, COL 0 & 1: Loss History (Spans both columns)
+        # ---------------------------------------------------
+        self.p_loss = self.win.addPlot(row=1, col=0, colspan=2)
+        self.p_loss.setTitle("Loss History", size='16pt', color='#111827')
+        self.p_loss.setLabel('bottom', "Iteration")
+        self.p_loss.setLabel('left', "Total Loss")
+        self.p_loss.setLogMode(x=False, y=True)
+        self.p_loss.showGrid(x=True, y=True, alpha=0.15) 
+        
+        # Modern vivid blue for the loss curve
+        self.loss_curve = self.p_loss.plot(pen=pg.mkPen('#3b82f6', width=3.0)) 
+
+        self.map_size = map_size
+        self.history = []
+
+    def update(self, iteration, loss_history, pos_tensor, concentration_tensor, rendered_map):
+        # 1. Update Loss
         valid_losses = [l for l in loss_history if not np.isnan(l) and not np.isinf(l)]
+        x_data = np.arange(len(valid_losses))
         if valid_losses:
-            self.ax_loss.set_ylim(min(valid_losses) * 0.5, max(valid_losses) * 1.5)
+            self.loss_curve.setData(x_data, valid_losses)
 
-        # Get gaussians position and concentration
+        # 2. Extract tensors
         pos = pos_tensor.detach().cpu().numpy()
         conc = concentration_tensor.detach().cpu().numpy()
-        
-        # Update coordinates
-        self.scatter.set_offsets(pos)
-        
-        # Update sizes
-        sizes = np.clip(conc * 50, 10, 500) # Evitar puntos invisibles o gigantes
-        self.scatter.set_sizes(sizes)
-        
-        # Update text
-        self.text_info.set_text(f"Iteration: {iteration}\nGaussians: {len(pos)}")
+        sizes = np.clip(conc * 50, 5, 30)
 
-        # Draw
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+        # 3. Update Scatter
+        self.scatter.setData(pos[:, 0], pos[:, 1], size=sizes)
+        self.text_item.setText(f"Iter: {iteration} | Gaussians: {len(pos)}")
 
-        # Store frame
-        try:
-            frame_path = os.path.join(self.temp_dir, f"frame_{iteration:05d}.png")
-            self.fig.savefig(frame_path, format='png', facecolor='white', dpi=70) 
-            self.frame_paths.append(frame_path)
-        except Exception as e:
-            print(f"[Warning] Error saving frame {iteration}: {e}")
-    
+        # 4. Update Rendered Map
+        if rendered_map is not None:
+            map_data = rendered_map.T
+            self.img_item.setImage(map_data, autoLevels=True)
+            self.img_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
+
+        self.app.processEvents()
+
+        # 5. Save state for GIF
+        self.history.append({
+            'it': iteration,
+            'loss_x': x_data,
+            'loss_y': valid_losses,
+            'pos': pos.copy(),
+            'sizes': sizes.copy(),
+            'map': map_data.copy() if rendered_map is not None else None
+        })
+
     def save_gif(self, filepath="plots/training_evolution.gif"):
-        if not self.frame_paths:
-            print("[GIF] There are no stored frames")
+        if not self.history:
+            print("[GIF] No frames stored in memory.")
             return
             
-        print(f"[GIF] Saving GIF animation using {len(self.frame_paths)} frames...")
-
-        # Convert to Image
-        imgs = [Image.open(p).convert('RGB') for p in self.frame_paths]
+        print(f"[GIF] Generating GIF from {len(self.history)} frames...")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        if imgs:
-            imgs[0].save(
-                filepath, 
-                save_all=True, 
-                append_images=imgs[1:], 
-                duration=100, 
-                loop=0
-            )
+        exporter = pyqtgraph.exporters.ImageExporter(self.win.scene())
+        temp_dir = "plots/temp_pg_frames"
+        os.makedirs(temp_dir, exist_ok=True)
+        frame_paths = []
+
+        for i, state in enumerate(self.history):
+            self.loss_curve.setData(state['loss_x'], state['loss_y'])
+            self.scatter.setData(state['pos'][:, 0], state['pos'][:, 1], size=state['sizes'])
+            self.text_item.setText(f"Iter: {state['it']} | Gaussians: {len(state['pos'])}")
+            
+            if state['map'] is not None:
+                self.img_item.setImage(state['map'], autoLevels=True)
+            
+            self.app.processEvents()
+            
+            frame_path = os.path.join(temp_dir, f"frame_{i:05d}.png")
+            exporter.export(frame_path)
+            frame_paths.append(frame_path)
+
+        frames = [iio.imread(p) for p in frame_paths]
+        if frames:
+            iio.imwrite(filepath, frames, duration=100, loop=0)
             print(f"[+] Training GIF saved in: {filepath}")
             
-        # Clean temporal directory
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        self.win.close()
 
 
 def get_exp_lr_func(lr_init, lr_final, max_steps):
@@ -133,7 +221,7 @@ class Trainer:
         self.model = model
         self.cfg = cfg
         
-        self.visualizer =  LiveVisualizer(model.map_size) if self.cfg.train.live_vis else None
+        self.visualizer =  LiveVisualizer(cfg.sim.map_size) if self.cfg.train.live_vis else None
 
         self.optimizer: optim.Optimizer = optim.Adam([
             {'params': [model._pos], 'lr': self.cfg.train.pos_lr, 'name': 'pos'},
@@ -237,18 +325,26 @@ class Trainer:
             # --- Real time visualization ---
             if self.visualizer and it % 20 == 0:
                 with torch.no_grad():
+                    from utils.plot_utils import render_gaussian_map
+                    current_gas_map = render_gaussian_map(
+                        self.model, 
+                        self.cfg.sim.map_size, 
+                        self.cfg.device, 
+                        cell_size=self.cfg.sim.cell_size
+                    )
+
                     self.visualizer.update(
                         iteration=it, 
                         loss_history=results.loss_history, 
                         pos_tensor=self.model.get_pos(), 
-                        concentration_tensor=self.model.get_concentration()
+                        concentration_tensor=self.model.get_concentration(),
+                        rendered_map=current_gas_map
                     )
             # ---------------------------------
             
             # --- Model evaluation ---
             if self.cfg.train.do_eval and it % self.cfg.train.eval_interval == 0:
                 with torch.no_grad():
-                    from utils.plot_utils import render_gaussian_map 
                     current_map = render_gaussian_map(
                         self.model, 
                         self.cfg.sim.map_size, 
@@ -269,11 +365,19 @@ class Trainer:
 
                     # Force a visualizer update to see the change
                     if self.visualizer:
+                        current_gas_map = render_gaussian_map(
+                            self.model, 
+                            self.cfg.sim.map_size, 
+                            self.cfg.device, 
+                            cell_size=self.cfg.sim.cell_size
+                        )
+
                         self.visualizer.update(
                             iteration=it, 
                             loss_history=results.loss_history, 
                             pos_tensor=self.model.get_pos(), 
-                            concentration_tensor=self.model.get_concentration()
+                            concentration_tensor=self.model.get_concentration(),
+                            rendered_map=current_gas_map
                         )
             # -------------------------
 
