@@ -265,7 +265,7 @@ def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, res
     # --- Plot details ---
     ax1.set_title("RMSE Evolution", pad=15)
     ax1.set_xlabel(x_label)
-    ax1.set_ylabel("RMSE vs Ground Truth")
+    ax1.set_ylabel("RMSE (ppm)")
     ax1.set_xticks(x_values)
     ax1.grid(True, linestyle='--', alpha=0.7)
     ax1.legend()
@@ -289,6 +289,6 @@ def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, res
     # Save plot
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
-    print(f"\n[+] Plot saved in: {save_path}")
+    print(f"\n[+] Experiment plot saved in: {save_path}")
     
     plt.close(fig) # Free memory

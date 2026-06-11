@@ -168,7 +168,7 @@ def main():
 
     plot_experiment_evolution(
         x_values=num_beams_list,
-        x_label="Number of Beams",
+        x_label="Number of beams",
         methods_info=AVAILABLE_METHODS,
         results_rmse=results_rmse,
         results_ssim=results_ssim,

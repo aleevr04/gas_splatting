@@ -182,7 +182,7 @@ def main():
 
     plot_experiment_evolution(
         x_values=resolutions,
-        x_label="Resolution (NxN)",
+        x_label="Resolution (MxM)",
         methods_info=AVAILABLE_METHODS,
         results_rmse=results_rmse,
         results_ssim=results_ssim,

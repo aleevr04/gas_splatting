@@ -15,7 +15,7 @@ from config import Config
 from trainer import Trainer
 from utils.sim_utils import generate_simulation_data
 from utils.init_utils import setup_gs_model
-from utils.plot_utils import render_gaussian_map
+from utils.plot_utils import render_gaussian_map, set_publication_style
 from utils.data_utils import save_experiment_results
 
 def rmse_loss(img_gt, img_pred):
@@ -58,7 +58,7 @@ def evaluate_single_seed(seed, base_cfg, methods):
     
     for method in methods:
         test_cfg = copy.deepcopy(cfg)
-        test_cfg.densify.long_axis_split = (method == "Long-Axis Split")
+        test_cfg.densify.long_axis_split = (method == "Proposed Strategy")
         
         # Setup model
         t_start = time.time()
@@ -88,13 +88,13 @@ def plot_split_comparison(methods, results, save_path):
     """
     Generates a 2x2 bar chart to compare A/B testing methods directly.
     """
-    fig, axes = plt.subplots(2, 2, figsize=(6, 6)) 
+    fig, axes = plt.subplots(2, 2, figsize=(9, 8)) 
     
     axes = axes.flatten() 
 
     metrics = [
         {"key": "rmse", "title": "RMSE", "ax": axes[0], "color": "skyblue"},
-        {"key": "ssim", "title": "SSIM", "ax": axes[1], "color": "lightgreen"},
+        {"key": "ssim", "title": "Structural Similarity (SSIM)", "ax": axes[1], "color": "lightgreen"},
         {"key": "gaussians", "title": "Number of Gaussians", "ax": axes[2], "color": "salmon"},
         {"key": "time", "title": "Total Time (s)", "ax": axes[3], "color": "mediumpurple"}
     ]
@@ -106,7 +106,8 @@ def plot_split_comparison(methods, results, save_path):
         means = [np.mean(results[metric["key"]][m]) for m in methods]
         stds = [np.std(results[metric["key"]][m]) for m in methods]
 
-        bars = ax.bar(x_pos, means, yerr=stds, align='center', alpha=0.8, color=metric["color"], capsize=10, edgecolor='black')
+        bars = ax.bar(x_pos, means, yerr=stds, align='center', alpha=0.8, width=0.6,
+                      color=metric["color"], capsize=10, edgecolor='black')
         
         ax.set_title(metric["title"], pad=15)
         ax.set_xticks(x_pos)
@@ -132,12 +133,14 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg: Config = args.cfg
+
+    set_publication_style()
     
     # Generate random reproducible seeds for rigorous testing
     num_seeds = 30
     seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
     
-    methods = ["Original Split", "Long-Axis Split"]
+    methods = ["Original Densification", "Proposed Strategy"]
     
     # Global structures
     results = {

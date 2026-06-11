@@ -26,7 +26,7 @@ plume_map = generate_fractal_gas_distribution(grid_size=(grid_h, grid_w))
 
 fig, ax = plt.subplots(figsize=(6, 5))
 
-im = ax.imshow(plume_map, cmap='jet', origin='lower')
+im = ax.imshow(plume_map, cmap='jet', origin='lower', extent=(0, map_w, 0, map_h))
 
 # Color bar
 cbar = fig.colorbar(im, ax=ax)
