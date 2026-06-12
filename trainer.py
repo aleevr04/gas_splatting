@@ -1,21 +1,15 @@
 import os
-import shutil
-import torch
 import torch.optim as optim
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 import numpy as np
-import pyqtgraph as pg
-import pyqtgraph.exporters
-import imageio.v3 as iio
-from pyqtgraph.Qt import QtWidgets, QtCore
 from tqdm import tqdm
 from dataclasses import dataclass, field
-from typing import List, Dict, cast
+from typing import List, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
 from utils.sim_utils import SimulationData
+from utils.live_vis import LiveVisualizer
 
 
 @dataclass
@@ -23,191 +17,6 @@ class TrainingResults:
     loss_history: List[float] = field(default_factory=list)
     densify_history: Dict[int, dict] = field(default_factory=dict)
     rmse_history: Dict[int, float] = field(default_factory=dict)
-
-
-class LiveVisualizer:
-    def __init__(self, cfg: Config):
-        self.map_size = cfg.sim.map_size
-        self.cell_size = cfg.sim.cell_size
-        self.history = []
-
-        # Initialize Qt
-        self.app = cast(QtWidgets.QApplication, QtWidgets.QApplication.instance())
-        if self.app is None:
-            # If no QApplication exists, create one
-            self.app = QtWidgets.QApplication([])
-
-        # --- GLOBAL STYLES (Modern Bright Theme) ---
-        pg.setConfigOption('background', '#f3f4f6') # Soft light gray background
-        pg.setConfigOption('foreground', '#374151') # Dark slate for axes and labels
-        pg.setConfigOptions(antialias=True) # Antialiaing
-
-        font = self.app.font()
-        font.setPointSize(12) 
-        self.app.setFont(font)
-
-        # --- WINDOW ---
-        # This is the widget that holds everything
-        self.win = pg.GraphicsLayoutWidget(show=True, title="Real-time Gas Splatting")
-        
-        # Compute window size based on map size
-        screen_rect = self.app.primaryScreen().availableGeometry()
-        target_height = int(screen_rect.height() * 0.80)
-        map_aspect_ratio = cfg.sim.map_size[0] / cfg.sim.map_size[1]
-        top_row_height = target_height * 0.6
-        ideal_width = int(3 * (top_row_height * map_aspect_ratio))
-        
-        min_width, min_height = 800, 600
-        final_width = max(ideal_width, min_width)
-        final_height = max(target_height, min_height)
-
-        self.win.setMinimumSize(min_width, min_height)
-        self.win.resize(final_width, final_height)
-
-        # Center the window on the screen
-        x_pos = (screen_rect.width() - final_width) // 2
-        y_pos = (screen_rect.height() - final_height) // 2
-        self.win.move(x_pos, y_pos)
-
-        # ---------------------------------------------------
-        # ROW 0, COL 0: Gaussians' positions (Scatter)
-        # ---------------------------------------------------
-        self.p_map = self.win.addPlot(row=0, col=0)
-        self.p_map.setTitle("Gaussians' positions", size='16pt', color='#111827')
-        self.p_map.setXRange(0, cfg.sim.map_size[0], padding=0)
-        self.p_map.setYRange(0, cfg.sim.map_size[1], padding=0)
-        self.p_map.setAspectLocked(True)
-        self.p_map.showGrid(x=True, y=True, alpha=0.15) # Softer grid for bright theme
-        
-        self.scatter = pg.ScatterPlotItem(
-            pen=pg.mkPen(None), 
-            brush=pg.mkBrush(239, 68, 68, 200) # Vibrant coral/red
-        )
-        self.p_map.addItem(self.scatter)
-
-        # Updated text overlay for light theme
-        self.text_item = pg.TextItem(text="", color='#111827', fill=pg.mkBrush(255, 255, 255, 200))
-        text_font = self.text_item.textItem.font()
-        text_font.setPointSize(13)
-        text_font.setBold(True)
-        self.text_item.setFont(text_font)
-        self.p_map.addItem(self.text_item)
-        self.text_item.setPos(cfg.sim.map_size[0] * 0.05, cfg.sim.map_size[1] * 0.95)
-
-        # ---------------------------------------------------
-        # ROW 0, COL 1: Estimated Gas Map (ImageItem)
-        # ---------------------------------------------------
-        self.p_render = self.win.addPlot(row=0, col=1)
-        self.p_render.setTitle("Estimated Gas Map", size='16pt', color='#111827')
-        self.p_render.setXRange(0, cfg.sim.map_size[0])
-        self.p_render.setYRange(0, cfg.sim.map_size[1])
-        self.p_render.setAspectLocked(True)
-        
-        self.img_item = pg.ImageItem()
-        self.img_item.setColorMap(pg.colormap.get('plasma'))
-        self.p_render.addItem(self.img_item)
-
-        self.img_item.setRect(QtCore.QRectF(0, 0, cfg.sim.map_size[0], cfg.sim.map_size[1]))
-
-        # ---------------------------------------------------
-        # ROW 0, COL 2:  Ground Truth (ImageItem)
-        # ---------------------------------------------------
-        self.p_gt = self.win.addPlot(row=0, col=2)
-        self.p_gt.setTitle("Ground Truth", size='16pt', color='#111827')
-        self.p_gt.setXRange(0, cfg.sim.map_size[0])
-        self.p_gt.setYRange(0, cfg.sim.map_size[1])
-        self.p_gt.setAspectLocked(True)
-        
-        self.img_gt_item = pg.ImageItem()
-        self.img_gt_item.setColorMap(pg.colormap.get('plasma'))
-        self.p_gt.addItem(self.img_gt_item)
-        self.img_gt_item.setRect(QtCore.QRectF(0, 0, cfg.sim.map_size[0], cfg.sim.map_size[1]))
-
-        # ---------------------------------------------------
-        # ROW 1, COL 0,1,2: Loss History (Spans all columns)
-        # ---------------------------------------------------
-        self.p_loss = self.win.addPlot(row=1, col=0, colspan=3)
-        self.p_loss.setTitle("Loss History", size='16pt', color='#111827')
-        self.p_loss.setLabel('bottom', "Iteration")
-        self.p_loss.setLabel('left', "Total Loss")
-        self.p_loss.setLogMode(x=False, y=True)
-        self.p_loss.showGrid(x=True, y=True, alpha=0.15) 
-        
-        # Modern vivid blue for the loss curve
-        self.loss_curve = self.p_loss.plot(pen=pg.mkPen('#3b82f6', width=3.0))
-
-    def set_ground_truth(self, ground_truth: np.ndarray):
-        if ground_truth is not None:
-            self.img_gt_item.setImage(ground_truth.T, autoLevels=True)
-            self.img_gt_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
-
-    def update(self, iteration, loss_history, model):
-        # Update Loss
-        valid_losses = [l for l in loss_history if not np.isnan(l) and not np.isinf(l)]
-        x_data = np.arange(len(valid_losses))
-        if valid_losses:
-            self.loss_curve.setData(x_data, valid_losses)
-
-        # Extract tensors
-        pos = model.get_pos().detach().cpu().numpy()
-        conc = model.get_concentration().detach().cpu().numpy()
-        sizes = np.clip(conc * 50, 5, 30)
-
-        # Update Gaussians Scatter
-        self.scatter.setData(pos[:, 0], pos[:, 1], size=sizes)
-        self.text_item.setText(f"Iter: {iteration} | Gaussians: {len(pos)}")
-
-        # Update Rendered Map
-        map_data = model.render_map(cell_size=self.cell_size).T
-        self.img_item.setImage(map_data, autoLevels=True)
-        self.img_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
-
-        self.app.processEvents()
-
-        # Save state for GIF
-        self.history.append({
-            'it': iteration,
-            'loss_x': x_data,
-            'loss_y': valid_losses,
-            'pos': pos.copy(),
-            'sizes': sizes.copy(),
-            'map': map_data.copy()
-        })
-
-    def save_gif(self, filepath="plots/training_evolution.gif"):
-        if not self.history:
-            print("[GIF] No frames stored in memory.")
-            return
-            
-        print(f"[GIF] Generating GIF from {len(self.history)} frames...")
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        exporter = pyqtgraph.exporters.ImageExporter(self.win.scene())
-        temp_dir = "plots/temp_pg_frames"
-        os.makedirs(temp_dir, exist_ok=True)
-        frame_paths = []
-
-        for i, state in enumerate(self.history):
-            self.loss_curve.setData(state['loss_x'], state['loss_y'])
-            self.scatter.setData(state['pos'][:, 0], state['pos'][:, 1], size=state['sizes'])
-            self.text_item.setText(f"Iter: {state['it']} | Gaussians: {len(state['pos'])}")
-            
-            if state['map'] is not None:
-                self.img_item.setImage(state['map'], autoLevels=True)
-            
-            self.app.processEvents()
-            
-            frame_path = os.path.join(temp_dir, f"frame_{i:05d}.png")
-            exporter.export(frame_path)
-            frame_paths.append(frame_path)
-
-        frames = [iio.imread(p) for p in frame_paths]
-        if frames:
-            iio.imwrite(filepath, frames, duration=100, loop=0)
-            print(f"[+] Training GIF saved in: {filepath}")
-            
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        self.win.close()
 
 
 def get_exp_lr_func(lr_init, lr_final, max_steps):
