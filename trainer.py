@@ -26,8 +26,9 @@ class TrainingResults:
 
 
 class LiveVisualizer:
-    def __init__(self, map_size):
-        self.map_size = map_size
+    def __init__(self, cfg: Config):
+        self.map_size = cfg.sim.map_size
+        self.cell_size = cfg.sim.cell_size
         self.history = []
 
         # Initialize Qt
@@ -51,10 +52,10 @@ class LiveVisualizer:
         
         # Compute window size based on map size
         screen_rect = self.app.primaryScreen().availableGeometry()
-        target_height = int(screen_rect.height() * 0.85)
-        map_aspect_ratio = map_size[0] / map_size[1]
+        target_height = int(screen_rect.height() * 0.80)
+        map_aspect_ratio = cfg.sim.map_size[0] / cfg.sim.map_size[1]
         top_row_height = target_height * 0.6
-        ideal_width = int(2 * (top_row_height * map_aspect_ratio))
+        ideal_width = int(3 * (top_row_height * map_aspect_ratio))
         
         min_width, min_height = 800, 600
         final_width = max(ideal_width, min_width)
@@ -73,8 +74,8 @@ class LiveVisualizer:
         # ---------------------------------------------------
         self.p_map = self.win.addPlot(row=0, col=0)
         self.p_map.setTitle("Gaussians' positions", size='16pt', color='#111827')
-        self.p_map.setXRange(0, map_size[0], padding=0)
-        self.p_map.setYRange(0, map_size[1], padding=0)
+        self.p_map.setXRange(0, cfg.sim.map_size[0], padding=0)
+        self.p_map.setYRange(0, cfg.sim.map_size[1], padding=0)
         self.p_map.setAspectLocked(True)
         self.p_map.showGrid(x=True, y=True, alpha=0.15) # Softer grid for bright theme
         
@@ -91,29 +92,41 @@ class LiveVisualizer:
         text_font.setBold(True)
         self.text_item.setFont(text_font)
         self.p_map.addItem(self.text_item)
-        self.text_item.setPos(map_size[0] * 0.05, map_size[1] * 0.95)
+        self.text_item.setPos(cfg.sim.map_size[0] * 0.05, cfg.sim.map_size[1] * 0.95)
 
         # ---------------------------------------------------
         # ROW 0, COL 1: Estimated Gas Map (ImageItem)
         # ---------------------------------------------------
         self.p_render = self.win.addPlot(row=0, col=1)
         self.p_render.setTitle("Estimated Gas Map", size='16pt', color='#111827')
-        self.p_render.setXRange(0, map_size[0])
-        self.p_render.setYRange(0, map_size[1])
+        self.p_render.setXRange(0, cfg.sim.map_size[0])
+        self.p_render.setYRange(0, cfg.sim.map_size[1])
         self.p_render.setAspectLocked(True)
         
         self.img_item = pg.ImageItem()
-        # 'plasma' or 'magma' look fantastic and vivid on bright backgrounds
-        colormap = pg.colormap.get('plasma') 
-        self.img_item.setColorMap(colormap)
+        self.img_item.setColorMap(pg.colormap.get('plasma'))
         self.p_render.addItem(self.img_item)
 
-        self.img_item.setRect(QtCore.QRectF(0, 0, map_size[0], map_size[1]))
+        self.img_item.setRect(QtCore.QRectF(0, 0, cfg.sim.map_size[0], cfg.sim.map_size[1]))
 
         # ---------------------------------------------------
-        # ROW 1, COL 0 & 1: Loss History (Spans both columns)
+        # ROW 0, COL 2:  Ground Truth (ImageItem)
         # ---------------------------------------------------
-        self.p_loss = self.win.addPlot(row=1, col=0, colspan=2)
+        self.p_gt = self.win.addPlot(row=0, col=2)
+        self.p_gt.setTitle("Ground Truth", size='16pt', color='#111827')
+        self.p_gt.setXRange(0, cfg.sim.map_size[0])
+        self.p_gt.setYRange(0, cfg.sim.map_size[1])
+        self.p_gt.setAspectLocked(True)
+        
+        self.img_gt_item = pg.ImageItem()
+        self.img_gt_item.setColorMap(pg.colormap.get('plasma'))
+        self.p_gt.addItem(self.img_gt_item)
+        self.img_gt_item.setRect(QtCore.QRectF(0, 0, cfg.sim.map_size[0], cfg.sim.map_size[1]))
+
+        # ---------------------------------------------------
+        # ROW 1, COL 0,1,2: Loss History (Spans all columns)
+        # ---------------------------------------------------
+        self.p_loss = self.win.addPlot(row=1, col=0, colspan=3)
         self.p_loss.setTitle("Loss History", size='16pt', color='#111827')
         self.p_loss.setLabel('bottom', "Iteration")
         self.p_loss.setLabel('left', "Total Loss")
@@ -123,38 +136,42 @@ class LiveVisualizer:
         # Modern vivid blue for the loss curve
         self.loss_curve = self.p_loss.plot(pen=pg.mkPen('#3b82f6', width=3.0))
 
-    def update(self, iteration, loss_history, pos_tensor, concentration_tensor, rendered_map):
-        # 1. Update Loss
+    def set_ground_truth(self, ground_truth: np.ndarray):
+        if ground_truth is not None:
+            self.img_gt_item.setImage(ground_truth.T, autoLevels=True)
+            self.img_gt_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
+
+    def update(self, iteration, loss_history, model):
+        # Update Loss
         valid_losses = [l for l in loss_history if not np.isnan(l) and not np.isinf(l)]
         x_data = np.arange(len(valid_losses))
         if valid_losses:
             self.loss_curve.setData(x_data, valid_losses)
 
-        # 2. Extract tensors
-        pos = pos_tensor.detach().cpu().numpy()
-        conc = concentration_tensor.detach().cpu().numpy()
+        # Extract tensors
+        pos = model.get_pos().detach().cpu().numpy()
+        conc = model.get_concentration().detach().cpu().numpy()
         sizes = np.clip(conc * 50, 5, 30)
 
-        # 3. Update Scatter
+        # Update Gaussians Scatter
         self.scatter.setData(pos[:, 0], pos[:, 1], size=sizes)
         self.text_item.setText(f"Iter: {iteration} | Gaussians: {len(pos)}")
 
-        # 4. Update Rendered Map
-        if rendered_map is not None:
-            map_data = rendered_map.T
-            self.img_item.setImage(map_data, autoLevels=True)
-            self.img_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
+        # Update Rendered Map
+        map_data = model.render_map(cell_size=self.cell_size).T
+        self.img_item.setImage(map_data, autoLevels=True)
+        self.img_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
 
         self.app.processEvents()
 
-        # 5. Save state for GIF
+        # Save state for GIF
         self.history.append({
             'it': iteration,
             'loss_x': x_data,
             'loss_y': valid_losses,
             'pos': pos.copy(),
             'sizes': sizes.copy(),
-            'map': map_data.copy() if rendered_map is not None else None
+            'map': map_data.copy()
         })
 
     def save_gif(self, filepath="plots/training_evolution.gif"):
@@ -208,7 +225,7 @@ class Trainer:
         self.model = model
         self.cfg = cfg
         
-        self.visualizer =  LiveVisualizer(cfg.sim.map_size) if self.cfg.train.live_vis else None
+        self.visualizer =  LiveVisualizer(cfg) if self.cfg.train.live_vis else None
 
         self.optimizer: optim.Optimizer = optim.Adam([
             {'params': [model._pos], 'lr': self.cfg.train.pos_lr, 'name': 'pos'},
@@ -260,6 +277,8 @@ class Trainer:
 
     def train(self, sim_data: SimulationData):
         results = TrainingResults()
+
+        if self.visualizer: self.visualizer.set_ground_truth(sim_data.img_gt)
 
         # Early stopping init
         ema_loss = None
@@ -316,9 +335,7 @@ class Trainer:
                 self.visualizer.update(
                     iteration=it, 
                     loss_history=results.loss_history, 
-                    pos_tensor=self.model.get_pos(), 
-                    concentration_tensor=self.model.get_concentration(),
-                    rendered_map=current_gas_map
+                    model=self.model
                 )
             # ---------------------------------
             
@@ -342,19 +359,14 @@ class Trainer:
 
                     self.visualizer.update(
                         iteration=it, 
-                        loss_history=results.loss_history, 
-                        pos_tensor=self.model.get_pos(), 
-                        concentration_tensor=self.model.get_concentration(),
-                        rendered_map=current_gas_map
+                        loss_history=results.loss_history,
+                        model=self.model
                     )
             # -------------------------
 
         pbar.close()
         
         if self.visualizer:
-            # Deactivate interactive mode
-            plt.ioff()
-
             # Save Training GIF
             os.makedirs("plots", exist_ok=True)
             self.visualizer.save_gif()
