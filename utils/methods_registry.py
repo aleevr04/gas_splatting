@@ -2,7 +2,6 @@ import time
 import utils.tomo_utils as tm
 from trainer import Trainer
 from utils.init_utils import setup_gs_model
-from utils.plot_utils import render_gaussian_map
 
 def run_sart(system_matrix, measurements, sim_data, cfg, setup_time=0.0):
     t0 = time.time()
@@ -42,7 +41,7 @@ def run_gas_splatting(system_matrix, measurements, sim_data, cfg, setup_time=0.0
     model, _, _ = setup_gs_model(sim_data, cfg)
     trainer = Trainer(model, cfg)
     trainer.train(sim_data)
-    gs_img = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+    gs_img = model.render_map(cell_size=cfg.sim.cell_size)
     
     total_time = time.time() - t_start
     return gs_img, total_time

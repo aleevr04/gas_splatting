@@ -12,10 +12,10 @@ from trainer import Trainer
 from gs_model import GasSplattingModel
 from utils.init_utils import setup_gs_model
 from utils.data_utils import build_custom_real_scenario
-from utils.plot_utils import render_gaussian_map, plot_initial_guess, set_publication_style
+from utils.plot_utils import plot_initial_guess, set_publication_style
 
 def plot_real_results(model, sim_data, results, cfg, save_path):
-    img_pred = render_gaussian_map(model, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+    img_pred = model.render_map(cell_size=cfg.sim.cell_size)
     map_w, map_h = cfg.sim.map_size
     
     fig, (ax_map, ax_loss) = plt.subplots(1, 2, figsize=(12, 5))

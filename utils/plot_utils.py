@@ -1,5 +1,4 @@
 import os
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -29,45 +28,6 @@ def set_publication_style():
         'savefig.dpi': 300,
         'savefig.pad_inches': 0.05
     })
-
-def render_gaussian_map(gaussians: GasSplattingModel, map_size: tuple[float, float], device: torch.device, cell_size):
-    """
-    Turns gaussians into a 2D image (numpy matrix)
-    """
-
-    w_cells = int(map_size[0] / cell_size)
-    h_cells = int(map_size[1] / cell_size)
-
-    # Grid
-    x = torch.linspace(0, map_size[0], w_cells, device=device)
-    y = torch.linspace(0, map_size[1], h_cells, device=device)
-    X, Y = torch.meshgrid(x, y, indexing='xy')
-    grid_pos = torch.stack([X, Y], dim=-1) # (H, W, 2)
-
-    # PyTorch expects (H, W) -> (h_cells, w_cells)
-    final_img = torch.zeros((h_cells, w_cells), device=device)
-
-    with torch.no_grad():
-        pos = gaussians.get_pos()
-        cov_inv = gaussians.get_covariance_inverse()
-        concentration = gaussians.get_concentration()
-
-        # Sum each Gaussian contribution
-        for k in range(gaussians.num_gaussians):
-            mu = pos[k]
-            sig_inv = cov_inv[k]
-            c = concentration[k]
-            
-            # Evaluate Gaussian at each cell
-            d = grid_pos - mu
-            d = d.unsqueeze(-1) 
-            
-            sig_inv_exp = sig_inv.view(1, 1, 2, 2)
-            dist = torch.matmul(d.transpose(-1, -2), torch.matmul(sig_inv_exp, d)).squeeze()
-            
-            final_img += c * torch.exp(-0.5 * dist)
-
-    return final_img.detach().cpu().numpy()
 
 def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
     """Shows ground truth and initial reconstruction image, and saves it to the plots directory"""
@@ -108,8 +68,8 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     max_map_dim = max(map_w, map_h)
 
     # Generate images
-    img_pred_gaussian = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=max_map_dim / 100)
-    img_pred = render_gaussian_map(gaussians, cfg.sim.map_size, cfg.device, cell_size=cfg.sim.cell_size)
+    img_pred_gaussian = gaussians.render_map(cell_size=max_map_dim / 100)
+    img_pred = gaussians.render_map(cell_size=cfg.sim.cell_size)
     
     # Colormap min and max values
     vmin = 0

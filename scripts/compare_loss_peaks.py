@@ -11,7 +11,7 @@ from config import Config
 from trainer import Trainer
 from utils.sim_utils import generate_simulation_data
 from utils.init_utils import setup_gs_model
-from utils.plot_utils import render_gaussian_map, set_publication_style
+from utils.plot_utils import set_publication_style
 
 def rmse_loss(img_gt, img_pred):
     return np.sqrt(np.mean((img_pred - img_gt)**2))
@@ -44,7 +44,7 @@ def main():
         train_results = trainer.train(sim_data)
         
         # Render the final 2D image
-        gs_img = render_gaussian_map(model, test_cfg.sim.map_size, test_cfg.device, cell_size=test_cfg.sim.cell_size)
+        gs_img = model.render_map(cell_size=test_cfg.sim.cell_size)
         
         # Store all relevant data
         results[method] = {

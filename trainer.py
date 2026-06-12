@@ -11,7 +11,7 @@ import imageio.v3 as iio
 from pyqtgraph.Qt import QtWidgets, QtCore
 from tqdm import tqdm
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, cast
 
 from config import Config
 from gs_model import GasSplattingModel
@@ -27,53 +27,43 @@ class TrainingResults:
 
 class LiveVisualizer:
     def __init__(self, map_size):
-        self.app = QtWidgets.QApplication.instance()
+        self.map_size = map_size
+        self.history = []
+
+        # Initialize Qt
+        self.app = cast(QtWidgets.QApplication, QtWidgets.QApplication.instance())
         if self.app is None:
+            # If no QApplication exists, create one
             self.app = QtWidgets.QApplication([])
-            
-        # [FIX] Tell VSCode/Pylance that this is definitely a QApplication
-        assert isinstance(self.app, QtWidgets.QApplication)
 
         # --- GLOBAL STYLES (Modern Bright Theme) ---
         pg.setConfigOption('background', '#f3f4f6') # Soft light gray background
         pg.setConfigOption('foreground', '#374151') # Dark slate for axes and labels
-        pg.setConfigOptions(antialias=True) 
+        pg.setConfigOptions(antialias=True) # Antialiaing
 
         font = self.app.font()
         font.setPointSize(12) 
         self.app.setFont(font)
 
         # --- WINDOW ---
+        # This is the widget that holds everything
         self.win = pg.GraphicsLayoutWidget(show=True, title="Real-time Gas Splatting")
-        screen_rect = self.app.primaryScreen().availableGeometry()
-
-        # 1. Start with a target height (e.g., 85% of your screen)
-        target_height = int(screen_rect.height() * 0.85)
-
-        # 2. Calculate the aspect ratio of your map (Width / Height)
-        map_aspect_ratio = map_size[0] / map_size[1]
-
-        # 3. Calculate ideal width
-        # The top row has TWO maps side-by-side. 
-        # Let's assume the top row takes up about 60% of the total window height.
-        top_row_height = target_height * 0.6
         
-        # Width = 2 plots * (plot height * map aspect ratio)
+        # Compute window size based on map size
+        screen_rect = self.app.primaryScreen().availableGeometry()
+        target_height = int(screen_rect.height() * 0.85)
+        map_aspect_ratio = map_size[0] / map_size[1]
+        top_row_height = target_height * 0.6
         ideal_width = int(2 * (top_row_height * map_aspect_ratio))
-
-        # Add a 100px buffer for the y-axis text, labels, and internal grid margins
-        final_width = ideal_width + 100 
-        final_height = target_height
-
-        # 4. Apply a sensible minimum limit so it doesn't crush on tiny maps
+        
         min_width, min_height = 800, 600
-        final_width = max(final_width, min_width)
-        final_height = max(final_height, min_height)
+        final_width = max(ideal_width, min_width)
+        final_height = max(target_height, min_height)
 
         self.win.setMinimumSize(min_width, min_height)
         self.win.resize(final_width, final_height)
 
-        # 5. Center the window on the screen
+        # Center the window on the screen
         x_pos = (screen_rect.width() - final_width) // 2
         y_pos = (screen_rect.height() - final_height) // 2
         self.win.move(x_pos, y_pos)
@@ -131,10 +121,7 @@ class LiveVisualizer:
         self.p_loss.showGrid(x=True, y=True, alpha=0.15) 
         
         # Modern vivid blue for the loss curve
-        self.loss_curve = self.p_loss.plot(pen=pg.mkPen('#3b82f6', width=3.0)) 
-
-        self.map_size = map_size
-        self.history = []
+        self.loss_curve = self.p_loss.plot(pen=pg.mkPen('#3b82f6', width=3.0))
 
     def update(self, iteration, loss_history, pos_tensor, concentration_tensor, rendered_map):
         # 1. Update Loss
@@ -324,14 +311,34 @@ class Trainer:
             
             # --- Real time visualization ---
             if self.visualizer and it % 20 == 0:
-                with torch.no_grad():
-                    from utils.plot_utils import render_gaussian_map
-                    current_gas_map = render_gaussian_map(
-                        self.model, 
-                        self.cfg.sim.map_size, 
-                        self.cfg.device, 
-                        cell_size=self.cfg.sim.cell_size
-                    )
+                current_gas_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
+
+                self.visualizer.update(
+                    iteration=it, 
+                    loss_history=results.loss_history, 
+                    pos_tensor=self.model.get_pos(), 
+                    concentration_tensor=self.model.get_concentration(),
+                    rendered_map=current_gas_map
+                )
+            # ---------------------------------
+            
+            # --- Model evaluation ---
+            if self.cfg.train.do_eval and it % self.cfg.train.eval_interval == 0:
+                current_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
+                rmse = np.sqrt(np.mean((current_map - sim_data.img_gt)**2))
+                
+                # Store it inside the class instance
+                results.rmse_history[it] = rmse
+            # ----------------------------
+
+            # --- Densification ---
+            if self.is_densify_it(it):
+                stats = self.model.densify_and_prune(self.optimizer)
+                results.densify_history[it] = stats
+
+                # Force a visualizer update to see the change
+                if self.visualizer:
+                    current_gas_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
 
                     self.visualizer.update(
                         iteration=it, 
@@ -340,45 +347,6 @@ class Trainer:
                         concentration_tensor=self.model.get_concentration(),
                         rendered_map=current_gas_map
                     )
-            # ---------------------------------
-            
-            # --- Model evaluation ---
-            if self.cfg.train.do_eval and it % self.cfg.train.eval_interval == 0:
-                with torch.no_grad():
-                    current_map = render_gaussian_map(
-                        self.model, 
-                        self.cfg.sim.map_size, 
-                        self.cfg.device, 
-                        cell_size=self.cfg.sim.cell_size
-                    )
-                    rmse = np.sqrt(np.mean((current_map - sim_data.img_gt)**2))
-                    
-                    # Store it inside the class instance
-                    results.rmse_history[it] = rmse
-            # ----------------------------
-
-            # --- Densification ---
-            if self.is_densify_it(it):
-                with torch.no_grad():
-                    stats = self.model.densify_and_prune(self.optimizer)
-                    results.densify_history[it] = stats
-
-                    # Force a visualizer update to see the change
-                    if self.visualizer:
-                        current_gas_map = render_gaussian_map(
-                            self.model, 
-                            self.cfg.sim.map_size, 
-                            self.cfg.device, 
-                            cell_size=self.cfg.sim.cell_size
-                        )
-
-                        self.visualizer.update(
-                            iteration=it, 
-                            loss_history=results.loss_history, 
-                            pos_tensor=self.model.get_pos(), 
-                            concentration_tensor=self.model.get_concentration(),
-                            rendered_map=current_gas_map
-                        )
             # -------------------------
 
         pbar.close()

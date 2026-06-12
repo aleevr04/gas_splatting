@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import math
@@ -113,6 +114,51 @@ class GasSplattingModel(nn.Module):
         concentration = self.get_concentration()
 
         return compute_definite_integral(pos, covariance_inverse, concentration, beams)
+    
+    def render_map(self, cell_size: float) -> np.ndarray:
+        """
+        Turns gaussians into a 2D image (numpy matrix)
+        """
+        # Extract dimensions from the map_size tensor
+        map_w = self.map_size[0].item()
+        map_h = self.map_size[1].item()
+        
+        # Dynamically infer the device from model parameters
+        device = self._pos.device
+
+        w_cells = int(map_w / cell_size)
+        h_cells = int(map_h / cell_size)
+
+        # Grid setup
+        x = torch.linspace(0, map_w, w_cells, device=device)
+        y = torch.linspace(0, map_h, h_cells, device=device)
+        X, Y = torch.meshgrid(x, y, indexing='xy')
+        grid_pos = torch.stack([X, Y], dim=-1) # (H, W, 2)
+
+        # PyTorch expects (H, W) -> (h_cells, w_cells)
+        final_img = torch.zeros((h_cells, w_cells), device=device)
+
+        with torch.no_grad():
+            pos = self.get_pos()
+            cov_inv = self.get_covariance_inverse()
+            concentration = self.get_concentration()
+
+            # Sum each Gaussian contribution
+            for k in range(self.num_gaussians):
+                mu = pos[k]
+                sig_inv = cov_inv[k]
+                c = concentration[k]
+                
+                # Evaluate Gaussian at each cell
+                d = grid_pos - mu
+                d = d.unsqueeze(-1) 
+                
+                sig_inv_exp = sig_inv.view(1, 1, 2, 2)
+                dist = torch.matmul(d.transpose(-1, -2), torch.matmul(sig_inv_exp, d)).squeeze()
+                
+                final_img += c * torch.exp(-0.5 * dist)
+
+        return final_img.detach().cpu().numpy()
 
     # -------- DENSIFICATION ----------
 
