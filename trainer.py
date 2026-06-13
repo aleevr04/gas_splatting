@@ -139,8 +139,6 @@ class Trainer:
             
             # --- Real time visualization ---
             if self.visualizer and it % 20 == 0:
-                current_gas_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
-
                 self.visualizer.update(
                     iteration=it, 
                     loss_history=results.loss_history, 
@@ -164,8 +162,6 @@ class Trainer:
 
                 # Force a visualizer update to see the change
                 if self.visualizer:
-                    current_gas_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
-
                     self.visualizer.update(
                         iteration=it, 
                         loss_history=results.loss_history,

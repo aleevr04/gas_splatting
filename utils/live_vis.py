@@ -5,26 +5,57 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 import imageio.v3 as iio
 from pyqtgraph.Qt import QtWidgets, QtCore, QtGui
-from typing import cast
+from typing import List, cast
 
 from config import Config
+from gs_model import GasSplattingModel
 
-# --- CENTRALIZED THEME ---
 THEME = {
     'bg': '#f3f4f6',                # Soft light gray background
     'fg': '#374151',                # Dark slate for axes/labels
+    'font_family': 'Segoe UI',
     'title': '#1f2937',             # Darker gray for titles
+    'title_size': '18pt',
     'axis_text': '#6b7280',         # Soft gray for axis numbers
+    'grid_alpha': 0.10,
+    'colormap': 'turbo',
+    # Scatter Style
     'scatter_brush': (99, 102, 241, 180), # Indigo with transparency
     'scatter_pen': (255, 255, 255, 200),  # White outline
-    'loss_line': '#4f46e5',         # Indigo matching line (swapped from #3b82f6 to match the scatter plot!)
+    'scatter_size_scale': 80,
+    'scatter_size_min': 10,
+    'scatter_size_max': 60,
+    # Loss Curve
+    'loss_line': '#4f46e5',         # Indigo matching line
     'loss_fill': (79, 70, 229, 30),   # Soft matching Indigo fill underneath the curve
-    'text_overlay': '#111827',
-    'grid_alpha': 0.15,
-    'font_family': 'Segoe UI',
-    'title_size': '18pt',
-    'colormap': 'turbo'
+    # Layout / sizing
+    'window_width_ratio': 0.5,
+    'min_window_width': 900,
+    'min_window_height': 600,
+    'margin': 20,
+    'col_min_width': 200
 }
+
+class CleanLogAxis(pg.AxisItem):
+    """Custom Y-axis that prevents overlapping text on log scales by only labeling 1, 2, and 5."""
+    def tickStrings(self, values, scale, spacing):
+        strings = super().tickStrings(values, scale, spacing)
+        
+        cleaned = []
+        for v, s in zip(values, strings):
+            # Convert internal values back to real numbers.
+            real_val = 10 ** v
+            
+            # Format to scientific notation (e.g., '8.000e-02') to safely grab the leading digit
+            leading_digit = f"{real_val:.3e}"[0]
+            
+            # Only keep the text if it's a 1, 2, or 5
+            if leading_digit in ['1', '2', '5']:
+                cleaned.append(s)
+            else:
+                cleaned.append("")  # Return an empty string to hide the text but keep the line!
+                
+        return cleaned
 
 class LiveVisualizer:
     def __init__(self, cfg: Config):
@@ -33,8 +64,8 @@ class LiveVisualizer:
         self.history = []
 
         self._init_qt()
-        self._init_window(cfg)
-        self._setup_plots(cfg)
+        self._init_window()
+        self._setup_plots()
 
     def _init_qt(self):
         """Initializes Qt and applies global theme settings."""
@@ -50,47 +81,42 @@ class LiveVisualizer:
         self.base_font.setStyleHint(QtGui.QFont.StyleHint.SansSerif)
         self.app.setFont(self.base_font)
 
-    def _init_window(self, cfg: Config):
+    def _init_window(self):
         """Calculates and centers the main window."""
         self.win = pg.GraphicsLayoutWidget(show=True, title="Real-time Gas Splatting")
         
         screen_rect = self.app.primaryScreen().availableGeometry()
-        
-        target_width = int(screen_rect.width() * 0.80)
-        single_map_width = target_width / 3.0
-        
-        map_aspect_ratio = cfg.sim.map_size[0] / cfg.sim.map_size[1]
-        map_height = single_map_width / map_aspect_ratio
-        
-        loss_plot_height = 350  # Fixed pixel height allocation for the bottom row
-        ui_margins = 50         # Buffer for titles, axes numbers, and window borders
-        ideal_height = int(map_height + loss_plot_height + ui_margins)
-        
-        final_width = max(target_width, 1000)
-        final_height = max(ideal_height, 650)
 
-        self.win.setMinimumSize(1000, 650)
-        self.win.resize(final_width, final_height)
+        target_width = int(screen_rect.width() * THEME['window_width_ratio'])
+        single_map_width = target_width / 3.0
+
+        map_aspect_ratio = self.map_size[0] / self.map_size[1]
+        map_height = single_map_width / map_aspect_ratio
+
+        ideal_height = int(2 * map_height)
+
+        final_width = max(target_width, THEME['min_window_width'])
+        final_height = max(ideal_height, THEME['min_window_height'])
+        max_height = int(screen_rect.height() * 0.9)
+        final_height = min(final_height, max_height)
+
+        self.win.setFixedSize(final_width, final_height)
         self.win.move((screen_rect.width() - final_width) // 2, (screen_rect.height() - final_height) // 2)
 
-    def _setup_plots(self, cfg: Config):
+    def _setup_plots(self):
         """Builds the internal widgets and applies the theme."""
         # Helper for HTML titles
         def make_title(text):
             return f'<b style="font-family: {THEME["font_family"]}, sans-serif;">{text}</b>'
 
-        self.top_layout = self.win.addLayout(row=0, col=0)
-        self.bottom_layout = self.win.addLayout(row=1, col=0)
+        # Header Label (Row 0, spans all columns)
+        self.header_label = self.win.addLabel(row=0, col=0, colspan=3)
 
-        # 1. Gaussians Scatter (Col 0)
-        self.p_gaussians = self.top_layout.addPlot(row=0, col=0)
+        # Gaussians Scatter (Row 1, Col 0)
+        self.p_gaussians = self.win.addPlot(row=1, col=0)
         self.p_gaussians.setTitle(make_title("Gaussians' positions"), size=THEME['title_size'], color=THEME['title'])
-        self.p_gaussians.showGrid(x=True, y=True, alpha=THEME['grid_alpha'])
-
-        axis_font = QtGui.QFont(THEME['font_family'], 10)
-        for axis in ['bottom', 'left']:
-            self.p_gaussians.getAxis(axis).setTickFont(axis_font)
-            self.p_gaussians.getAxis(axis).setTextPen(THEME['axis_text'])
+        self.p_gaussians.hideAxis('left')
+        self.p_gaussians.hideAxis('bottom')
         
         self.scatter = pg.ScatterPlotItem(
             brush=pg.mkBrush(color=THEME['scatter_brush']),
@@ -98,15 +124,8 @@ class LiveVisualizer:
         )
         self.p_gaussians.addItem(self.scatter)
 
-        # Text Overlay
-        self.text_item = pg.TextItem(text="", color=THEME['text_overlay'], fill=pg.mkBrush(255, 255, 255, 200))
-        text_font = QtGui.QFont(THEME['font_family'], 13, QtGui.QFont.Weight.Bold)
-        self.text_item.setFont(text_font)
-        self.p_gaussians.addItem(self.text_item)
-        self.text_item.setPos(cfg.sim.map_size[0] * 0.10, cfg.sim.map_size[1] * 0.90)
-
-        # 2. Estimated Map (Col 1)
-        self.p_map = self.top_layout.addPlot(row=0, col=1)
+        # Estimated Map (Row 1, Col 1)
+        self.p_map = self.win.addPlot(row=1, col=1)
         self.p_map.setTitle(make_title("Estimated Map"), size=THEME['title_size'], color=THEME['title'])
         self.p_map.hideAxis('left')
         self.p_map.hideAxis('bottom')
@@ -114,8 +133,8 @@ class LiveVisualizer:
         self.img_map_item = pg.ImageItem()
         self.p_map.addItem(self.img_map_item)
 
-        # 3. Ground Truth (Col 2)
-        self.p_gt = self.top_layout.addPlot(row=0, col=2)
+        # Ground Truth (Row 1, Col 2)
+        self.p_gt = self.win.addPlot(row=1, col=2)
         self.p_gt.setTitle(make_title("Ground Truth"), size=THEME['title_size'], color=THEME['title'])
         self.p_gt.hideAxis('left')
         self.p_gt.hideAxis('bottom')
@@ -123,20 +142,14 @@ class LiveVisualizer:
         self.img_gt_item = pg.ImageItem()
         self.p_gt.addItem(self.img_gt_item)
 
-        # 4. Colorbar (Col 3)
+        # Colormap for maps (shared scale)
         cmap = pg.colormap.get(THEME['colormap'])
         self.img_map_item.setColorMap(cmap)
         self.img_gt_item.setColorMap(cmap)
 
-        self.cbar = pg.ColorBarItem(interactive=False, colorMap=cmap, width=15)
-        self.cbar.setMaximumHeight(360)
-        self.cbar.setImageItem(self.img_gt_item)
-        self.cbar.getAxis('right').setTickFont(QtGui.QFont(THEME['font_family'], 11))
-        self.top_layout.addItem(self.cbar, row=0, col=3)
-        self.top_layout.layout.setAlignment(self.cbar, QtCore.Qt.AlignmentFlag.AlignVCenter)
-
-        # 5. Loss Curve (Row 1)
-        self.p_loss = self.bottom_layout.addPlot(row=0, col=0)
+        # Loss Curve (Row 2) - span across all columns
+        custom_y_axis = CleanLogAxis(orientation='left')
+        self.p_loss = self.win.addPlot(row=2, col=0, colspan=3, axisItems={'left': custom_y_axis})
         self.p_loss.setTitle(make_title("Loss History"), size=THEME['title_size'], color=THEME['title'])
         self.p_loss.setLabel('bottom', "Iteration")
         self.p_loss.setLogMode(x=False, y=True)
@@ -149,25 +162,51 @@ class LiveVisualizer:
             self.p_loss.getAxis(axis).setTextPen(THEME['axis_text'])
         
         self.loss_curve = self.p_loss.plot(
-            pen=pg.mkPen(color=THEME['loss_line'], width=2.5), 
-            fillLevel=None, 
+            pen=pg.mkPen(color=THEME['loss_line'], width=2.5),
             fillBrush=pg.mkBrush(THEME['loss_fill'])
         )
+        self.p_loss.setContentsMargins(0, 0, THEME['margin'], 0)
 
         for p in [self.p_gaussians, self.p_map, self.p_gt]:
-            p.setXRange(0, cfg.sim.map_size[0], padding=0.0)
-            p.setYRange(0, cfg.sim.map_size[1], padding=0.0)
+            # Force the exact physical dimensions
+            p.setXRange(0, self.map_size[0], padding=0.0)
+            p.setYRange(0, self.map_size[1], padding=0.0)
             p.setAspectLocked(True)
+
+            # Left and right margins
+            margin = THEME['margin']
+            p.setContentsMargins(margin, 0, margin, 0)
+            
+            # Prevent the plots from independently resizing themselves 
+            # when dynamic data (Gaussians/Estimated Map) gets close to the edges.
+            p.getViewBox().disableAutoRange()
+            
+            # Disable user interaction completely
+            p.setMouseEnabled(x=False, y=False)
+            p.setMenuEnabled(False)
+            p.hideButtons() # hide auto-scale button
+
+        main_layout = self.win.ci.layout
+
+        if main_layout is not None:
+            # compute and set column minimum widths
+            total_w = max(0, int(self.win.size().width()))
+            col_w = max(THEME['col_min_width'], int(total_w / 3) - 2 * THEME['margin'])
+            for col in range(3):
+                main_layout.setColumnMinimumWidth(col, col_w)
 
     def set_ground_truth(self, ground_truth: np.ndarray):
         """Sets the static ground truth image and stores its levels to lock the color scale."""
         if ground_truth is not None:
             self.img_gt_item.setImage(ground_truth.T, autoLevels=True)
             self.img_gt_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
-            self.gt_levels = (ground_truth.min(), ground_truth.max())
+            # Save levels and apply them to both images so both maps use identical color scale
+            self.gt_levels = (float(ground_truth.min()), float(ground_truth.max()))
+            self.img_gt_item.setLevels(self.gt_levels)
+            self.img_map_item.setLevels(self.gt_levels)
 
-    def update(self, iteration, loss_history, model):
-        """Extracts the latest parameters from the model, updates the UI components, and saves the frame state."""
+    def update(self, iteration: int, loss_history: List[float], model: GasSplattingModel):
+        """Extracts the latest parameters from the model, updates the UI components, and saves the frame state."""   
         # Update Loss
         valid_losses = [l for l in loss_history if not np.isnan(l) and not np.isinf(l)]
         x_data = np.arange(len(valid_losses))
@@ -182,20 +221,23 @@ class LiveVisualizer:
         # Extract tensors
         pos = model.get_pos().detach().cpu().numpy()
         conc = model.get_concentration().detach().cpu().numpy()
-        sizes = np.clip(conc * 50, 5, 30)
+        sizes = np.clip(conc * THEME['scatter_size_scale'], THEME['scatter_size_min'], THEME['scatter_size_max'])
 
         # Update Gaussians Scatter
         self.scatter.setData(pos[:, 0], pos[:, 1], size=sizes)
-        self.text_item.setText(f"Iter: {iteration} | Gaussians: {len(pos)}")
+
+        # Update Header Label
+        self.header_label.setText(
+            f"Iter: {iteration} | Gaussians: {len(pos)}", 
+            color=THEME['title'], 
+            size='16pt', 
+            bold=True
+        )
 
         # Update Rendered Map
         map_data = model.render_map(cell_size=self.cell_size).T
-
         if hasattr(self, 'gt_levels'):
-            self.img_map_item.setImage(map_data, autoLevels=False)
-            self.img_map_item.setLevels(self.gt_levels)
-        else:
-            self.img_map_item.setImage(map_data, autoLevels=True)
+            self.img_map_item.setImage(map_data, levels=self.gt_levels)
         self.img_map_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
 
         self.app.processEvents()
@@ -227,10 +269,19 @@ class LiveVisualizer:
         for i, state in enumerate(self.history):
             self.loss_curve.setData(state['loss_x'], state['loss_y'])
             self.scatter.setData(state['pos'][:, 0], state['pos'][:, 1], size=state['sizes'])
-            self.text_item.setText(f"Iter: {state['it']} | Gaussians: {len(state['pos'])}")
+            self.header_label.setText(
+                f"Iter: {state['it']} | Gaussians: {len(state['pos'])}", 
+                color=THEME['title'], 
+                size='16pt', 
+                bold=True
+            )
             
             if state['map'] is not None:
-                self.img_map_item.setImage(state['map'], autoLevels=True)
+                # Use fixed levels when available so GIF frames share the same color scale
+                if hasattr(self, 'gt_levels'):
+                    self.img_map_item.setImage(state['map'], levels=self.gt_levels)
+                else:
+                    self.img_map_item.setImage(state['map'], autoLevels=True)
             
             self.app.processEvents()
             

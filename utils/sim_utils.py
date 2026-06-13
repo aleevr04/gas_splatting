@@ -53,10 +53,10 @@ def generate_fractal_gas_distribution(
     """
     height, width = grid_size
     
-    # 1. Dynamic Scale
+    # Dynamic Scale
     base_scale = min(height, width) * scale_fraction
     
-    # Generate Fractal Noise (Same as before, using base_scale)
+    # Generate Fractal Noise
     noise = np.zeros(grid_size)
     frequency, amplitude = 1.0, 1.0
     
@@ -69,7 +69,7 @@ def generate_fractal_gas_distribution(
         
     noise = (noise - noise.min()) / (noise.max() - noise.min())
     
-    # 2. Create Gaussian Envelope (Center Mask)
+    # Create Gaussian Envelope (Center Mask)
     if center_bias > 0.0:
         y, x = np.indices(grid_size)
         center_y, center_x = height / 2.0, width / 2.0
@@ -85,7 +85,7 @@ def generate_fractal_gas_distribution(
         # Apply the envelope to force edges towards zero
         noise = noise * mask
 
-    # 3. Threshold and Power Curve
+    # Threshold and Power Curve
     gas_map = np.maximum(0, noise - threshold)
     
     if gas_map.max() > 0:
@@ -244,11 +244,9 @@ def truncate_beam(start: tuple, end: tuple, obstacles_geometry):
     """    
     beam_line = LineString([start, end])
     
-    # Shapely comprueba muy rápido internamente si los "bounding boxes" se tocan
     if not beam_line.intersects(obstacles_geometry):
         return start, end
         
-    # Restar los obstáculos a la línea
     free_space = beam_line.difference(obstacles_geometry)
     
     if free_space.is_empty:
@@ -279,7 +277,6 @@ def generate_free_space_beams(occupancy_grid: np.ndarray, cell_size: float, num_
         r1, c1 = free_cells[idx1]
         r2, c2 = free_cells[idx2]
         
-        # Convertir a metros (centrado en la celda)
         p1 = (c1 * cell_size + cell_size/2, r1 * cell_size + cell_size/2)
         p2 = (c2 * cell_size + cell_size/2, r2 * cell_size + cell_size/2)
         
