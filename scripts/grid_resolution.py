@@ -11,7 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import utils.tomo_utils as tm
-from config import Config
+from config import ExperimentConfig
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import plot_experiment_evolution
 from utils.data_utils import save_experiment_results
@@ -119,9 +119,6 @@ def main():
     # --- Configuration ---
     resolutions = [20, 30, 40, 60, 80]
 
-    num_seeds = 30
-    seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
-
     # Pull methods directly from the central registry
     methods = list(AVAILABLE_METHODS.keys())
     
@@ -131,9 +128,12 @@ def main():
     results_time = {m: {r: [] for r in resolutions} for m in methods}
 
     parser = ArgumentParser(description="Compare methods results when grid resolution grows")
-    parser.add_arguments(Config, dest="cfg")
+    parser.add_arguments(ExperimentConfig, dest="cfg")
     args = parser.parse_args()
-    cfg = args.cfg
+    cfg: ExperimentConfig = args.cfg
+
+    num_seeds = cfg.num_seeds
+    seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
     # Deactivate tomo methods progress bar
     tm.tqdm = lambda x, **kwargs: x
@@ -161,7 +161,7 @@ def main():
 
     # --- Save results ---
     metadata = {
-        "experiment_name": "grid_resolution_evolution",
+        "experiment_name": "grid_resolution",
         "resolutions": resolutions,
         "seeds": seeds,
         "map_size": cfg.sim.map_size,

@@ -1,4 +1,5 @@
 import os
+import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
@@ -157,7 +158,8 @@ class Trainer:
 
             # --- Densification ---
             if self.is_densify_it(it):
-                stats = self.model.densify_and_prune(self.optimizer)
+                with torch.no_grad():
+                    stats = self.model.densify_and_prune(self.optimizer)
                 results.densify_history[it] = stats
 
                 # Force a visualizer update to see the change

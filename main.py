@@ -44,25 +44,25 @@ def main():
     # --- Plot Results ---
     plot_training_results(model, sim_data, results, cfg)
 
-    # # --- Save Results ---
-    # metadata = {
-    #     "experiment_name": "training",
-    #     "num_beams": cfg.sim.num_beams,
-    #     "map_size": cfg.sim.map_size,
-    #     "cell_size": cfg.sim.cell_size
-    # }
+    # --- Save Results ---
+    metadata = {
+        "experiment_name": "training",
+        "num_beams": cfg.sim.num_beams,
+        "map_size": cfg.sim.map_size,
+        "cell_size": cfg.sim.cell_size
+    }
 
-    # results = {
-    #     "initial_gaussians": model.initial_gaussians,
-    #     "final_gaussians": model.num_gaussians,
-    #     "setup_time": setup_time,
-    #     "training_time": train_time,
-    #     "loss_history": results.loss_history,
-    #     "rmse_history": results.rmse_history,
-    #     "densify_history": results.densify_history
-    # }
+    results = {
+        "initial_gaussians": model.initial_gaussians,
+        "final_gaussians": model.num_gaussians,
+        "setup_time": setup_time,
+        "training_time": train_time,
+        "loss_history": results.loss_history,
+        "rmse_history": results.rmse_history,
+        "densify_history": results.densify_history
+    }
 
-    # save_experiment_results(metadata, results)
+    save_experiment_results(metadata, results)
 
 if __name__ == "__main__":
     main()

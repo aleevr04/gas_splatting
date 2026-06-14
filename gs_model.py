@@ -383,23 +383,13 @@ class GasSplattingModel(nn.Module):
         grads[grads.isnan()] = 0.0
         grad_mask = grads > self.densify_cfg.gradient_threshold
 
-        use_long_axis = hasattr(self.densify_cfg, 'long_axis_split') and self.densify_cfg.long_axis_split
+        use_original_dens = hasattr(self.densify_cfg, 'original_dens') and self.densify_cfg.original_dens
 
         num_clones = 0
         num_splits = 0
 
-        if use_long_axis:
-            # --- UNIFIED DENSIFICATION (Long-Axis Split + Clone) ---
-            # We don't use small_scale_mask. Every Gaussian with high gradient
-            # undergoes the unified operation
-            num_splits = int(grad_mask.sum().item())
-            
-            if num_splits > 0:
-                self.split_long_axis(optimizer, grad_mask)
-                self.splits += num_splits
-                
-        else:
-            # --- TRADITIONAL DENSIFICATION ---
+        if use_original_dens:
+            # --- Original Densification ---
             # Gaussians with small scale
             adjusted_scales = self.get_scale() / torch.max(self.map_size)
             small_scale_mask = torch.max(adjusted_scales, dim=1).values < self.densify_cfg.scale_threshold
@@ -424,6 +414,15 @@ class GasSplattingModel(nn.Module):
             
             if num_splits > 0:
                 self.split_original(optimizer, split_mask)
+                self.splits += num_splits
+        else:
+            # --- Proposed Densification ---
+            # We don't use small_scale_mask. Every Gaussian with high gradient
+            # undergoes the unified operation
+            num_splits = int(grad_mask.sum().item())
+            
+            if num_splits > 0:
+                self.split_long_axis(optimizer, grad_mask)
                 self.splits += num_splits
 
         # --- Prune ---

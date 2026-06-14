@@ -32,7 +32,7 @@ def main():
     for method in methods:
         print(f"\nTraining with {method}...")
         test_cfg = copy.deepcopy(base_cfg)
-        test_cfg.densify.long_axis_split = (method == "Proposed Strategy")
+        test_cfg.densify.original_dens = (method == "Original Densification")
         
         # Enable mid-training evaluation
         test_cfg.train.do_eval = True

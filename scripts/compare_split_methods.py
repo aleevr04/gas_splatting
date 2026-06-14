@@ -11,7 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from config import Config
+from config import ExperimentConfig
 from trainer import Trainer
 from utils.sim_utils import generate_simulation_data
 from utils.init_utils import setup_gs_model
@@ -58,7 +58,7 @@ def evaluate_single_seed(seed, base_cfg, methods):
     
     for method in methods:
         test_cfg = copy.deepcopy(cfg)
-        test_cfg.densify.long_axis_split = (method == "Proposed Strategy")
+        test_cfg.densify.original_dens = (method == "Original Densification")
         
         # Setup model
         t_start = time.time()
@@ -84,9 +84,9 @@ def evaluate_single_seed(seed, base_cfg, methods):
     print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
     return seed, local_results
 
-def plot_split_comparison(methods, results, save_path):
+def plot_densification_comparison(methods, results, save_path):
     """
-    Generates a 2x2 bar chart to compare A/B testing methods directly.
+    Generates a 2x2 bar chart to compare densification methods directly.
     """
     fig, axes = plt.subplots(2, 2, figsize=(9, 8)) 
     
@@ -130,14 +130,14 @@ def plot_split_comparison(methods, results, save_path):
 
 def main():
     parser = ArgumentParser(description="Compare Original vs Long-Axis Split")
-    parser.add_arguments(Config, dest="cfg")
+    parser.add_arguments(ExperimentConfig, dest="cfg")
     args = parser.parse_args()
-    cfg: Config = args.cfg
+    cfg: ExperimentConfig = args.cfg
 
     set_publication_style()
     
     # Generate random reproducible seeds for rigorous testing
-    num_seeds = 30
+    num_seeds = cfg.num_seeds
     seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
     
     methods = ["Original Densification", "Proposed Strategy"]
@@ -150,7 +150,7 @@ def main():
         "time": {m: [] for m in methods}
     }
     
-    print(f"Starting experiment: comparing splitting methods across {len(seeds)} seeds.")
+    print(f"Starting experiment: comparing densification methods across {len(seeds)} seeds.")
     
     # --- Parallelization ---
     max_workers=4
@@ -184,17 +184,18 @@ def main():
 
     # --- Save Data ---
     metadata = {
-        "experiment_name": "split_methods_comparison",
+        "experiment_name": "densification_methods_comparison",
         "methods": methods,
         "seeds": seeds,
         "map_size": cfg.sim.map_size,
-        "cell_size": cfg.sim.cell_size
+        "cell_size": cfg.sim.cell_size,
+        "num_beams": cfg.sim.num_beams
     }
     save_experiment_results(metadata, results)
 
     # --- Generate Plots ---
-    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'split_comparison.png')
-    plot_split_comparison(methods, results, save_path)
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'densification_comparison.png')
+    plot_densification_comparison(methods, results, save_path)
 
 if __name__ == "__main__":
     main()

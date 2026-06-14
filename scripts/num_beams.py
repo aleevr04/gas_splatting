@@ -11,7 +11,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import utils.tomo_utils as tm
-from config import Config
+from config import ExperimentConfig
 from utils.sim_utils import SimulationData
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import plot_experiment_evolution
@@ -104,10 +104,6 @@ def main():
     # --- Configuration ---
     num_beams_list = [10, 20, 30, 40, 50, 60] 
 
-    num_seeds = 30
-    np.random.seed(42)
-    seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
-
     methods = list(AVAILABLE_METHODS.keys())
     
     # Global structures to collect the outputs from the parallel processes
@@ -116,11 +112,14 @@ def main():
     results_time = {m: {b: [] for b in num_beams_list} for m in methods}
 
     parser = ArgumentParser(description="Compare methods results when the number of beams changes")
-    parser.add_arguments(Config, dest="cfg")
+    parser.add_arguments(ExperimentConfig, dest="cfg")
     args = parser.parse_args()
-    cfg = args.cfg
+    cfg: ExperimentConfig = args.cfg
 
     cfg.sim.num_beams = num_beams_list[-1]
+
+    num_seeds = cfg.num_seeds
+    seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
     tm.tqdm = lambda x, **kwargs: x
 
@@ -147,7 +146,7 @@ def main():
 
     # --- Save results ---
     metadata = {
-        "experiment_name": "num_beams_evolution",
+        "experiment_name": "num_beams",
         "num_beams_list": num_beams_list,
         "seeds": seeds,
         "map_size": cfg.sim.map_size,

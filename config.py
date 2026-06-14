@@ -6,8 +6,8 @@ from simple_parsing import field
 
 @dataclass
 class InitParams:
-    min_gaussians: int = 10
-    coarse_proportion: float = 0.1
+    min_gaussians: int = 10 # Minimum number of Gaussians to use when no peaks are found in the initialization
+    coarse_proportion: float = 0.1 # Proportion of the map (longer side) to be used for coarse initialization
 
 @dataclass
 class SimulationParams:
@@ -15,20 +15,20 @@ class SimulationParams:
     gt_file: Optional[str] = None # csv file containing gas distribution data
     obstacles_file: Optional[str] = None # csv file containing occupancy grid data 
 
-    map_size: Tuple[float, float] = (20.0, 20.0) # (map_width, map_height). Ignored when a csv file is provided
-    cell_size: float = 1.0
+    map_size: Tuple[float, float] = (20.0, 20.0) # Map size (map_width, map_height) in meters. Ignored when a csv file is provided
+    cell_size: float = 1.0 # Cell size in meters
 
-    num_beams: int = 30
+    num_beams: int = 30 # Total number of TDLAS beams
     
     noise: bool = field(default=False, action="store_true") # Add noise to simulated measurements
     snr_db: int = 30 # Signal-to-noise ratio (dB)
 
 @dataclass
 class TrainParams:
-    pos_lr: float = 0.008
-    scale_lr: float = 0.003
-    rotation_lr: float = 0.001
-    concentration_lr: float = 0.005
+    pos_lr: float = 0.008 # Position learning rate
+    scale_lr: float = 0.003 # Scale learning rate
+    rotation_lr: float = 0.001 # Rotation learning rate
+    concentration_lr: float = 0.005 # Concentration learning rate
 
     iterations: int = 1500 # Max number of iterations
 
@@ -39,17 +39,17 @@ class TrainParams:
     do_eval: bool = field(default=False, action="store_true") # Evaluate model during training using ground truth
     eval_interval: int = 25 # Model evaluation interval
 
-    live_vis: bool = field(default=False, action="store_true")
+    live_vis: bool = field(default=False, action="store_true") # Visualize training progress in real-time
 
 @dataclass
 class DensificationParams:
-    gradient_threshold: float = 0.003
-    scale_threshold: float = 0.05
-    prune_threshold: float = 0.005
-    densify_from: int = 100
-    densify_until: int = 750
-    densify_interval: int = 50
-    long_axis_split: bool = field(default=False, action="store_true")
+    gradient_threshold: float = 0.003 # Threshold for gradient-based densification
+    scale_threshold: float = 0.05 # Threshold used by orginal densification method. It decides whether the Gaussian should be splitted or cloned
+    prune_threshold: float = 0.005 # Threshold for pruning Gaussians with low concentration
+    densify_from: int = 100 # Densification will start at this iteration
+    densify_until: int = 750 # Densification will stop at this iteration
+    densify_interval: int = 50 # Iteration interval for densification
+    original_dens: bool = field(default=False, action="store_true") # Use the original densification method instead of the proposed one based on Long-Axis Split approach
 
 @dataclass
 class Config:
@@ -67,3 +67,7 @@ class Config:
             print("Warning: CUDA requested but not available. Using CPU.")
             return torch.device("cpu")
         return torch.device(self.device_type)
+
+@dataclass
+class ExperimentConfig(Config):
+    num_seeds: int = 30 # Number of random seeds for the experiment
