@@ -26,7 +26,7 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
     Isolated function that evaluates a single seed. 
     It runs in an independent worker process.
     """
-    # CRITICAL! Prevent PyTorch/NumPy from crashing the CPU by spawning 
+    # Prevent PyTorch/NumPy from crashing the CPU by spawning 
     # too many internal threads when running multiple parallel processes.
     torch.set_num_threads(1)
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -92,7 +92,6 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
             
             local_time[method_name][n_beams] = total_time
             local_rmse[method_name][n_beams] = rmse_loss(gt_img, res_img)
-
             data_range = gt_img.max() - gt_img.min()
             local_ssim[method_name][n_beams] = ssim(gt_img, res_img, data_range=data_range)
 

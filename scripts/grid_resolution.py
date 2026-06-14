@@ -25,7 +25,7 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
     Isolated function that evaluates a single seed.
     It runs in an independent worker process.
     """
-    # CRITICAL! Prevent PyTorch/NumPy from crashing the CPU by spawning 
+    # Prevent PyTorch/NumPy from crashing the CPU by spawning 
     # too many internal threads when running multiple parallel processes.
     torch.set_num_threads(1)
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -70,7 +70,6 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
 
     for res in resolutions:
         # Update cell size based on resolution (assuming square map size)
-        # We use map_size[0] to get the width
         cfg.sim.cell_size = cfg.sim.map_size[0] / res
         
         # In this experiment, since the grid resolution changes, the dimensions 
@@ -81,16 +80,9 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
 
         grid_size = (res, res)
 
-        # Lazy matrix setup: Only compute it if at least one method needs it
-        system_matrix = None
-        matrix_setup_time = 0.0
-        
-        needs_matrix = any(AVAILABLE_METHODS[m].get("requires_matrix", True) for m in methods)
-
-        if needs_matrix:
-            matrix_setup_start = time.time()
-            system_matrix = create_system_matrix_sparse(grid_size, sim_data.beams.tolist(), cfg.sim.cell_size).tocsr()
-            matrix_setup_time = time.time() - matrix_setup_start
+        matrix_setup_start = time.time()
+        system_matrix = create_system_matrix_sparse(grid_size, sim_data.beams.tolist(), cfg.sim.cell_size).tocsr()
+        matrix_setup_time = time.time() - matrix_setup_start
             
         for method_name in methods:
             method_info = AVAILABLE_METHODS[method_name]
@@ -106,8 +98,6 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
 
             local_time[method_name][res] = total_time
             local_rmse[method_name][res] = rmse_loss(gt_img, res_img)
-
-            # SSIM calculation (explicitly cast to float for strict type checkers)
             data_range = gt_img.max() - gt_img.min()
             local_ssim[method_name][res] = ssim(gt_img, res_img, data_range=data_range)
 

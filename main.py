@@ -39,7 +39,7 @@ def main():
     results = trainer.train(sim_data)
     train_time = time.time() - t0
     print(f"Loss: {results.loss_history[-1]:.6f}")
-    print(f"Setup Time: {setup_time} | Training Time: {train_time}")
+    print(f"Setup Time: {setup_time:.3f} | Training Time: {train_time:.3f}")
 
     # --- Plot Results ---
     plot_training_results(model, sim_data, results, cfg)

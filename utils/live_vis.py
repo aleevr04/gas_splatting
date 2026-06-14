@@ -2,8 +2,8 @@ import os
 import shutil
 import numpy as np
 import pyqtgraph as pg
-import pyqtgraph.exporters
-import imageio.v3 as iio
+import subprocess
+import imageio_ffmpeg
 from pyqtgraph.Qt import QtWidgets, QtCore, QtGui
 from typing import List, cast
 
@@ -11,29 +11,40 @@ from config import Config
 from gs_model import GasSplattingModel
 
 THEME = {
-    'bg': '#f3f4f6',                # Soft light gray background
-    'fg': '#374151',                # Dark slate for axes/labels
+    # Application & Layout Colors
+    'bg': '#f3f4f6',          # Main application background (soft gray)
+    'fg': '#374151',          # Primary foreground for default text and labels (dark slate)
+    'header_bg': '#ffffff',   # Background color specifically for the top HTML banner
+    'border': '#e5e7eb',      # Color for dividers, borders, and layout separators
+
+    # Typography
     'font_family': 'Segoe UI',
-    'title': '#1f2937',             # Darker gray for titles
-    'title_size': '18pt',
-    'axis_text': '#6b7280',         # Soft gray for axis numbers
-    'grid_alpha': 0.10,
+    'title': '#1f2937',         # Color for the plot titles
+    'title_size': '18pt',         # Font size for plot titles
+    'text_light': '#8b92a0',    # Muted text color for the static labels inside the banner
+    'axis_text': '#6b7280',     # Color for the numerical tick values on the graphs
+    
+    # Plotting & Visuals
     'colormap': 'turbo',
-    # Scatter Style
-    'scatter_brush': (99, 102, 241, 180), # Indigo with transparency
-    'scatter_pen': (255, 255, 255, 200),  # White outline
+    'grid_alpha': 0.10,   # Opacity (0.0 to 1.0) of the background grid in the loss plot
+
+    # Accents & Data Points
+    'accent': '#4f46e5',                # Primary brand color (Indigo) for banner numbers AND the loss curve line
+    'accent_fill': (79, 70, 229, 30),     # Highly transparent version of the accent color for shading under the loss curve
+    'scatter_brush': (99, 102, 241, 180), # Lighter indigo with transparency for the inner fill of Gaussian points
+    'scatter_pen': (255, 255, 255, 200),  # Slightly transparent white for the outline border of Gaussian points
+    
+    # Gaussian Sizing Physics
     'scatter_size_scale': 80,
     'scatter_size_min': 10,
     'scatter_size_max': 60,
-    # Loss Curve
-    'loss_line': '#4f46e5',         # Indigo matching line
-    'loss_fill': (79, 70, 229, 30),   # Soft matching Indigo fill underneath the curve
-    # Layout / sizing
+    
+    # --- Window Dimensions ---
     'window_width_ratio': 0.5,
     'min_window_width': 900,
     'min_window_height': 600,
-    'margin': 20,
-    'col_min_width': 200
+    'margin': 20,           # Margins around the plots and inside the layout
+    'col_min_width': 200    # Minimum width for each of the 3 plot columns
 }
 
 class CleanLogAxis(pg.AxisItem):
@@ -43,17 +54,12 @@ class CleanLogAxis(pg.AxisItem):
         
         cleaned = []
         for v, s in zip(values, strings):
-            # Convert internal values back to real numbers.
             real_val = 10 ** v
-            
-            # Format to scientific notation (e.g., '8.000e-02') to safely grab the leading digit
             leading_digit = f"{real_val:.3e}"[0]
-            
-            # Only keep the text if it's a 1, 2, or 5
             if leading_digit in ['1', '2', '5']:
                 cleaned.append(s)
             else:
-                cleaned.append("")  # Return an empty string to hide the text but keep the line!
+                cleaned.append("") 
                 
         return cleaned
 
@@ -83,9 +89,33 @@ class LiveVisualizer:
         self.app.setFont(self.base_font)
 
     def _init_window(self):
-        """Calculates and centers the main window."""
-        self.win = pg.GraphicsLayoutWidget(show=True, title="Real-time Gas Splatting")
+        """Calculates and centers the main window, now using a central QWidget."""
+        # Wrap everything in a main QWidget
+        self.main_win = QtWidgets.QWidget()
+        self.main_win.setWindowTitle("Real-time Gas Splatting")
+        self.layout = QtWidgets.QVBoxLayout(self.main_win)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+
+        # Header Banner
+        self.header_banner = QtWidgets.QLabel()
+        self.header_banner.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.header_banner.setStyleSheet(f"""
+            QLabel {{
+                background-color: {THEME['header_bg']};
+                font-family: '{THEME['font_family']}';
+                font-size: 14pt;
+                padding: 18px;
+                border-bottom: 2px solid {THEME['border']};
+            }}
+        """)
+        self.layout.addWidget(self.header_banner, stretch=0)
+
+        # Pyqtgraph Canvas
+        self.canvas = pg.GraphicsLayoutWidget()
+        self.layout.addWidget(self.canvas, stretch=1)
         
+        # Sizing Logic
         screen_rect = self.app.primaryScreen().availableGeometry()
 
         target_width = int(screen_rect.width() * THEME['window_width_ratio'])
@@ -101,20 +131,17 @@ class LiveVisualizer:
         max_height = int(screen_rect.height() * 0.9)
         final_height = min(final_height, max_height)
 
-        self.win.setFixedSize(final_width, final_height)
-        self.win.move((screen_rect.width() - final_width) // 2, (screen_rect.height() - final_height) // 2)
+        self.main_win.resize(final_width, final_height)
+        self.main_win.move((screen_rect.width() - final_width) // 2, (screen_rect.height() - final_height) // 2)
+        self.main_win.show()
 
     def _setup_plots(self):
         """Builds the internal widgets and applies the theme."""
-        # Helper for HTML titles
         def make_title(text):
             return f'<b style="font-family: {THEME["font_family"]}, sans-serif;">{text}</b>'
 
-        # Header Label (Row 0, spans all columns)
-        self.header_label = self.win.addLabel(row=0, col=0, colspan=3)
-
-        # Gaussians Scatter (Row 1, Col 0)
-        self.p_gaussians = self.win.addPlot(row=1, col=0)
+        # Gaussians Scatter (Row 0, Col 0)
+        self.p_gaussians = self.canvas.addPlot(row=0, col=0)
         self.p_gaussians.setTitle(make_title("Gaussians' positions"), size=THEME['title_size'], color=THEME['title'])
         self.p_gaussians.hideAxis('left')
         self.p_gaussians.hideAxis('bottom')
@@ -125,8 +152,8 @@ class LiveVisualizer:
         )
         self.p_gaussians.addItem(self.scatter)
 
-        # Estimated Map (Row 1, Col 1)
-        self.p_map = self.win.addPlot(row=1, col=1)
+        # Estimated Map (Row 0, Col 1)
+        self.p_map = self.canvas.addPlot(row=0, col=1)
         self.p_map.setTitle(make_title("Estimated Map"), size=THEME['title_size'], color=THEME['title'])
         self.p_map.hideAxis('left')
         self.p_map.hideAxis('bottom')
@@ -134,8 +161,8 @@ class LiveVisualizer:
         self.img_map_item = pg.ImageItem()
         self.p_map.addItem(self.img_map_item)
 
-        # Ground Truth (Row 1, Col 2)
-        self.p_gt = self.win.addPlot(row=1, col=2)
+        # Ground Truth (Row 0, Col 2)
+        self.p_gt = self.canvas.addPlot(row=0, col=2)
         self.p_gt.setTitle(make_title("Ground Truth"), size=THEME['title_size'], color=THEME['title'])
         self.p_gt.hideAxis('left')
         self.p_gt.hideAxis('bottom')
@@ -143,14 +170,14 @@ class LiveVisualizer:
         self.img_gt_item = pg.ImageItem()
         self.p_gt.addItem(self.img_gt_item)
 
-        # Colormap for maps (shared scale)
+        # Colormap for maps
         cmap = pg.colormap.get(THEME['colormap'])
         self.img_map_item.setColorMap(cmap)
         self.img_gt_item.setColorMap(cmap)
 
-        # Loss Curve (Row 2) - span across all columns
+        # Loss Curve (Row 1, Cols 0-2)
         custom_y_axis = CleanLogAxis(orientation='left')
-        self.p_loss = self.win.addPlot(row=2, col=0, colspan=3, axisItems={'left': custom_y_axis})
+        self.p_loss = self.canvas.addPlot(row=1, col=0, colspan=3, axisItems={'left': custom_y_axis})
         self.p_loss.setTitle(make_title("Loss History"), size=THEME['title_size'], color=THEME['title'])
         self.p_loss.setLabel('bottom', "Iteration")
         self.p_loss.setLogMode(x=False, y=True)
@@ -163,8 +190,8 @@ class LiveVisualizer:
             self.p_loss.getAxis(axis).setTextPen(THEME['axis_text'])
         
         self.loss_curve = self.p_loss.plot(
-            pen=pg.mkPen(color=THEME['loss_line'], width=2.5),
-            fillBrush=pg.mkBrush(THEME['loss_fill'])
+            pen=pg.mkPen(color=THEME['accent'], width=2.5),
+            fillBrush=pg.mkBrush(THEME['accent_fill'])
         )
         self.p_loss.setContentsMargins(0, 0, THEME['margin'], 0)
 
@@ -187,11 +214,10 @@ class LiveVisualizer:
             p.setMenuEnabled(False)
             p.hideButtons() # hide auto-scale button
 
-        main_layout = self.win.ci.layout
+        main_layout = self.canvas.ci.layout
 
         if main_layout is not None:
-            # compute and set column minimum widths
-            total_w = max(0, int(self.win.size().width()))
+            total_w = max(0, int(self.canvas.size().width()))
             col_w = max(THEME['col_min_width'], int(total_w / 3) - 2 * THEME['margin'])
             for col in range(3):
                 main_layout.setColumnMinimumWidth(col, col_w)
@@ -207,7 +233,7 @@ class LiveVisualizer:
             self.img_map_item.setLevels(self.gt_levels)
 
     def update(self, iteration: int, loss_history: List[float], model: GasSplattingModel):
-        """Extracts the latest parameters from the model, updates the UI components, and saves the frame state."""   
+        """Extracts the latest parameters from the model, updates the UI components, and saves the frame state."""
         # Update Loss
         valid_losses = [l for l in loss_history if not np.isnan(l) and not np.isinf(l)]
         x_data = np.arange(len(valid_losses))
@@ -227,13 +253,18 @@ class LiveVisualizer:
         # Update Gaussians Scatter
         self.scatter.setData(pos[:, 0], pos[:, 1], size=sizes)
 
-        # Update Header Label
-        self.header_label.setText(
-            f"Iter: {iteration} | Gaussians: {len(pos)}", 
-            color=THEME['title'], 
-            size='16pt', 
-            bold=True
+        # Update Header Banner
+        accent = THEME['accent']
+        text_color = THEME['text_light']
+        spacer = '&nbsp;' * 10
+        
+        formatted_text = (
+            f'<span style="color: {text_color};">Iteration:</span> '
+            f'<b style="color: {accent};">{iteration}</b>{spacer}'
+            f'<span style="color: {text_color};">Gaussians:</span> '
+            f'<b style="color: {accent};">{len(pos)}</b>'
         )
+        self.header_banner.setText(formatted_text)
 
         # Update Rendered Map
         map_data = model.render_map(cell_size=self.cell_size).T
@@ -256,29 +287,34 @@ class LiveVisualizer:
     def save_gif(self, filepath="plots/training_evolution.gif"):
         """Replays the stored training history to export a GIF animation of the process."""
         if not self.history:
-            print("[GIF] No frames stored in memory.")
+            print("Could not generate GIF. No frames stored in memory.")
             return
             
-        print(f"[GIF] Generating GIF from {len(self.history)} frames...")
+        print(f"Generating GIF from {len(self.history)} frames...")
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        exporter = pyqtgraph.exporters.ImageExporter(self.win.scene())
         temp_dir = "plots/temp_pg_frames"
         os.makedirs(temp_dir, exist_ok=True)
         frame_paths = []
 
+        # Save each frame as a PNG
         for i, state in enumerate(self.history):
             self.loss_curve.setData(state['loss_x'], state['loss_y'])
             self.scatter.setData(state['pos'][:, 0], state['pos'][:, 1], size=state['sizes'])
-            self.header_label.setText(
-                f"Iter: {state['it']} | Gaussians: {len(state['pos'])}", 
-                color=THEME['title'], 
-                size='16pt', 
-                bold=True
+            
+            # Repaint Header for GIF
+            accent = THEME['accent']
+            text_color = THEME['text_light']
+            spacer = '&nbsp;' * 10
+            formatted_text = (
+                f'<span style="color: {text_color};">Iteration:</span> '
+                f'<b style="color: {accent};">{state["it"]}</b>{spacer}'
+                f'<span style="color: {text_color};">Gaussians:</span> '
+                f'<b style="color: {accent};">{len(state["pos"])}</b>'
             )
+            self.header_banner.setText(formatted_text)
             
             if state['map'] is not None:
-                # Use fixed levels when available so GIF frames share the same color scale
                 if hasattr(self, 'gt_levels'):
                     self.img_map_item.setImage(state['map'], levels=self.gt_levels)
                 else:
@@ -287,13 +323,25 @@ class LiveVisualizer:
             self.app.processEvents()
             
             frame_path = os.path.join(temp_dir, f"frame_{i:05d}.png")
-            exporter.export(frame_path)
+            
+            # Native PyQt frame grabber capturing the full window
+            pixmap = self.main_win.grab()
+            pixmap.save(frame_path, "PNG")
             frame_paths.append(frame_path)
 
-        frames = [iio.imread(p) for p in frame_paths]
-        if frames:
-            iio.imwrite(filepath, frames, duration=100, loop=0)
-            print(f"[+] Training GIF saved in: {filepath}")
+        # Create GIF from saved frames using ffmpeg
+        input_pattern = f"{temp_dir}/frame_%05d.png"
+        
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        subprocess.run([
+            ffmpeg_exe, '-y', '-framerate', '10', 
+            '-loglevel', 'error',
+            '-i', input_pattern,
+            '-filter_complex', 'split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse',
+            '-loop', '0', 
+            filepath
+        ], check=True)
+        print(f"[+] Training GIF saved in: {filepath}")
             
         shutil.rmtree(temp_dir, ignore_errors=True)
-        self.win.close()
+        self.main_win.close()

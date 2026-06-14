@@ -106,7 +106,7 @@ The `scripts/` directory contains various executable files designed to test, val
 
 * `densification_training.py`: Compares both densification strategies using a single seed, rendering the resulting gas maps alongside their loss functions and RMSE evolution plots.
 
-* `long_axis_split.py`: Launches an interactive Matplotlib window featuring real-time sliders to visually inspect and tune the parameters of the proposed Gaussian splitting technique.
+* `long_axis_split.py`: Launches an interactive window featuring real-time sliders to visually inspect and tune the parameters of the proposed Gaussian splitting technique.
 
 * `split_c_factor.py`: Generates an error-evolution graph evaluating the impact of the splitting factor parameter (c) within our custom densification strategy.
 
