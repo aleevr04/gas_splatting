@@ -129,7 +129,7 @@ def plot_densification_comparison(methods, results, save_path):
     plt.close(fig)
 
 def main():
-    parser = ArgumentParser(description="Compare Original vs Long-Axis Split")
+    parser = ArgumentParser(description="Compare Densification Methods in Gas Splatting")
     parser.add_arguments(ExperimentConfig, dest="cfg")
     args = parser.parse_args()
     cfg: ExperimentConfig = args.cfg
