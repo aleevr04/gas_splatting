@@ -65,6 +65,7 @@ class LiveVisualizer:
 
         self._init_qt()
         self._init_window()
+        self.app.processEvents()
         self._setup_plots()
 
     def _init_qt(self):
