@@ -47,6 +47,42 @@ gas_splatting/
 └── trainer.py          # Optimization loop
 ```
 
+## 🛠️ Installation
+
+**1. Clone repository**
+```bash
+git clone https://github.com/aleevr04/gas_splatting.git
+cd gas_splatting
+```
+
+**2. Create and activate a virtual environment**
+
+The most convenient way to install dependencies is by creating a virtual environment. There are several tools for this purpose like `venv` or `conda`. A `venv` example is shown below:
+
+```bash
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+**3. Install PyTorch**
+
+Since PyTorch is highly hardware-dependent (CPU or GPU), please install it by following the instructions from their [official website](https://pytorch.org/get-started/locally/). CPU-only example:
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
+
+**4. Install project dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
 <details>
 <summary><h2>🚀 Usage</h2></summary>
 
@@ -119,42 +155,6 @@ python main.py --pos_lr 0.005 --concentration_lr 0.002 --live_vis
 > ⚠️ Important Note: Because configuration classes are shared across the entire project, some CLI options might not be applicable or will have no effect depending on the specific script you are executing. For example, changing the seed will not affect experiment scripts desinged to test different seeds.
 
 </details>
-
-## 🛠️ Installation
-
-**1. Clone repository**
-```bash
-git clone https://github.com/aleevr04/gas_splatting.git
-cd gas_splatting
-```
-
-**2. Create and activate a virtual environment**
-
-The most convenient way to install dependencies is by creating a virtual environment. There are several tools for this purpose like `venv` or `conda`. A `venv` example is shown below:
-
-```bash
-# Linux / macOS
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Windows
-python -m venv .venv
-.venv\Scripts\activate
-```
-
-**3. Install PyTorch**
-
-Since PyTorch is highly hardware-dependent (CPU or GPU), please install it by following the instructions from their [official website](https://pytorch.org/get-started/locally/). CPU-only example:
-
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-```
-
-**4. Install project dependencies**
-
-```bash
-pip install -r requirements.txt
-```
 
 ## 📜 Acknowledgements and License
 
