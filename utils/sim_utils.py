@@ -193,6 +193,97 @@ def generate_horizontal_vertical_beams(map_size_m: tuple, num_beams: int):
 
     return beams
 
+def generate_beams_from_obstacles(occupancy_grid: np.ndarray, cell_size: float):
+    beams = []
+
+    grid_h, grid_w = occupancy_grid.shape
+
+    # Horizontal beams
+    for i in range(0, grid_h, 2):
+        start = None
+        for j in range(0, grid_w):
+            # Occupied cell (start of obstacle)
+            if occupancy_grid[i, j] != 0 and start is None:
+                start = (j * cell_size, i * cell_size + cell_size/2)
+            
+            # Free cell (end of obstacle)
+            if occupancy_grid[i, j] == 0 and start is not None:
+                end = (j * cell_size, i * cell_size + cell_size/2)
+                beams.append((start, end))
+                start = None
+
+        if start is not None:
+            end = (grid_w * cell_size, i * cell_size + cell_size/2)
+            beams.append((start, end))
+
+    return beams
+
+def build_obstacles_geometry(occupancy_grid: np.ndarray, cell_size: float):
+    obstacle_polys = []
+    
+    occupied_indices = np.argwhere(occupancy_grid != 0)
+    
+    for r, c in occupied_indices:
+        x_min = c * cell_size
+        y_min = r * cell_size
+        poly = Polygon([
+            (x_min, y_min), 
+            (x_min + cell_size, y_min), 
+            (x_min + cell_size, y_min + cell_size), 
+            (x_min, y_min + cell_size)
+        ])
+        obstacle_polys.append(poly)
+        
+    return unary_union(obstacle_polys)
+
+def truncate_beam(start: tuple, end: tuple, obstacles_geometry):
+    """
+    Extracts the first valid, unoccluded free-space segment of a beam.
+    Modifies both start and end points to avoid obstacles.
+    Returns None if the beam is entirely occluded.
+    """    
+    beam_line = LineString([start, end])
+    
+    if not beam_line.intersects(obstacles_geometry):
+        return start, end
+        
+    free_space = beam_line.difference(obstacles_geometry)
+    
+    if free_space.is_empty:
+        return None
+        
+    if free_space.geom_type == 'LineString':
+        coords = list(free_space.coords)
+        return coords[0], coords[-1]
+        
+    elif free_space.geom_type == 'MultiLineString':
+        first_segment = free_space.geoms[0]
+        coords = list(first_segment.coords)
+        return coords[0], coords[-1]
+
+    return None
+
+def generate_free_space_beams(occupancy_grid: np.ndarray, cell_size: float, num_beams: int):
+    """Generates beams using random free space points"""
+    free_cells = np.argwhere(occupancy_grid == 0)
+    
+    if len(free_cells) < 2:
+        return []
+        
+    beams = []
+    for _ in range(num_beams):
+        idx1, idx2 = np.random.choice(len(free_cells), size=2, replace=False)
+        
+        r1, c1 = free_cells[idx1]
+        r2, c2 = free_cells[idx2]
+        
+        p1 = (c1 * cell_size + cell_size/2, r1 * cell_size + cell_size/2)
+        p2 = (c2 * cell_size + cell_size/2, r2 * cell_size + cell_size/2)
+        
+        beams.append((p1, p2))
+        
+    return beams
+
 # ==========================================
 #     BEAM GAS INTEGRAL / SYSTEM MATRIX
 # ==========================================
@@ -309,15 +400,55 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
 
         img_gt = generate_fractal_gas_distribution(grid_size=(grid_h, grid_w))
 
+    # --- Obstacles ---
+    occupancy_grid = None
+    if cfg.sim.obstacles_file is not None:
+        if cfg.sim.gt_file is None:
+            print("Warning: Occupancy map provided but no Ground Truth file. It's recommended to provide both.")
+        if not os.path.exists(cfg.sim.obstacles_file):
+            raise FileNotFoundError(f"Occupancy file not found: {cfg.sim.obstacles_file}")
+        
+        occupancy_grid = np.loadtxt(cfg.sim.obstacles_file, delimiter=',')
+        
+        if occupancy_grid.shape != img_gt.shape:
+            raise ValueError(f"Occupancy grid shape {occupancy_grid.shape} does not match GT shape {img_gt.shape}")
+        
+        # Ensure GT is exactly 0.0 inside obstacles to avoid conflicts
+        img_gt[occupancy_grid != 0] = 0.0
+
     # ------ Beams ------
     print("Generating beams...")
-    beams_list = []
+    real_beams_list = []
 
-    num_random_beams = cfg.sim.num_beams // 2
-    num_radial_beams = cfg.sim.num_beams - num_random_beams 
+    if occupancy_grid is not None:
+        real_beams_list += generate_free_space_beams(occupancy_grid, cfg.sim.cell_size, cfg.sim.num_beams)
+
+        # Truncate real beams if occupancy is provided
+        obstacles_geometry = build_obstacles_geometry(occupancy_grid, cfg.sim.cell_size)
+        truncated_beams = []
+        for start, end in real_beams_list:
+            truncated_beam = truncate_beam(start, end, obstacles_geometry)
+            if truncated_beam is not None:
+                new_start, new_end = truncated_beam
+                if math.hypot(new_end[0] - new_start[0], new_end[1] - new_start[1]) > 1e-3:
+                    truncated_beams.append(truncated_beam)
+        real_beams_list = truncated_beams
+        print(f"Beams after truncating: {len(real_beams_list)}")
+    else:
+        num_random_beams = cfg.sim.num_beams // 2
+        num_radial_beams = cfg.sim.num_beams - num_random_beams 
         
-    beams_list += generate_random_beams(cfg.sim.map_size, num_random_beams)
-    beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
+        real_beams_list += generate_random_beams(cfg.sim.map_size, num_random_beams)
+        real_beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
+
+    beams_list = list(real_beams_list)
+
+    # Add virtual beams from obstacles
+    if occupancy_grid is not None:
+        print("Generating virtual beams from obstacles...")
+        virtual_beams = generate_beams_from_obstacles(occupancy_grid, cfg.sim.cell_size)
+        beams_list += virtual_beams
+        print(f"Virtual beams generated: {len(virtual_beams)}")
 
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
     print(f"Total beams: {len(beams_list)}")
@@ -328,9 +459,13 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
 
     if cfg.sim.noise:
         print(f"Adding noise to the measurements ({cfg.sim.snr_db} dB)...")
-        num_beams = len(beams_list)
-        if num_beams > 0:
-            measurements = add_measurement_noise(y_true[:num_beams], snr_db=cfg.sim.snr_db)
+        # Only add noise to real beams. Virtual beams must remain strictly 0.
+        num_real_beams = len(real_beams_list)
+        if num_real_beams > 0:
+            y_real = y_true[:num_real_beams]
+            y_virtual = y_true[num_real_beams:]
+            y_real_noisy = add_measurement_noise(y_real, snr_db=cfg.sim.snr_db)
+            measurements = torch.cat([y_real_noisy, y_virtual])
         else:
             measurements = y_true
     else:
