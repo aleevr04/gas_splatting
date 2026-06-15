@@ -38,7 +38,7 @@ def save_experiment_results(metadata, results, folder="results"):
     with open(filepath, 'w') as f:
         json.dump(data_to_save, f, indent=4)
     
-    print(f"Experiment results saved in: {filepath}")
+    print(f"[+] Experiment results saved in: {filepath}")
     return filepath
 
 def load_real_tdlas_data(filepath, cfg: Config) -> SimulationData:

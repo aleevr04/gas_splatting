@@ -3,6 +3,8 @@ import shutil
 import numpy as np
 import pyqtgraph as pg
 import subprocess
+import queue
+import threading
 import imageio_ffmpeg
 from pyqtgraph.Qt import QtWidgets, QtCore, QtGui
 from typing import List, cast
@@ -67,12 +69,32 @@ class LiveVisualizer:
     def __init__(self, cfg: Config):
         self.map_size = cfg.sim.map_size
         self.cell_size = cfg.sim.cell_size
-        self.history = []
+
+        # Asynchronous frame queue for GIF generation
+        self.frame_queue = queue.Queue()
+        self.frame_count = 0
+        self.temp_dir = "plots/temp_pg_frames"
+        os.makedirs(self.temp_dir, exist_ok=True)
+        
+        # Frame writer thread to handle saving frames without blocking the main UI
+        self.writer_thread = threading.Thread(target=self._frame_writer, daemon=True)
+        self.writer_thread.start()
 
         self._init_qt()
         self._init_window()
         self.app.processEvents()
         self._setup_plots()
+
+    def _frame_writer(self):
+        while True:
+            item = self.frame_queue.get()
+            if item is None:
+                break
+            
+            frame_path, qimage = item
+            # Save the QImage to disk as PNG
+            qimage.save(frame_path, "PNG")
+            self.frame_queue.task_done()
 
     def _init_qt(self):
         """Initializes Qt and applies global theme settings."""
@@ -274,65 +296,32 @@ class LiveVisualizer:
 
         self.app.processEvents()
 
-        # Save state for GIF
-        self.history.append({
-            'it': iteration,
-            'loss_x': x_data,
-            'loss_y': valid_losses,
-            'pos': pos.copy(),
-            'sizes': sizes.copy(),
-            'map': map_data.copy()
-        })
+        # Frame Capture for GIF Generation
+        qimage = self.main_win.grab().toImage()
+        frame_path = os.path.join(self.temp_dir, f"frame_{self.frame_count:05d}.png")
+        
+        # Send the frame to the writer thread via the queue
+        self.frame_queue.put((frame_path, qimage))
+        self.frame_count += 1
 
     def save_gif(self, filepath="plots/training_evolution.gif"):
-        """Replays the stored training history to export a GIF animation of the process."""
-        if not self.history:
-            print("Could not generate GIF. No frames stored in memory.")
+        """Waits for all frames to be written, then generates a GIF from the captured frames using ffmpeg."""
+        if self.frame_count == 0:
+            print("Could not generate GIF. No frames captured.")
             return
             
-        print(f"Generating GIF from {len(self.history)} frames...")
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        temp_dir = "plots/temp_pg_frames"
-        os.makedirs(temp_dir, exist_ok=True)
-        frame_paths = []
+        print("Waiting for frame capture to complete...")
+        # Send stop signal to the writer thread and wait for it to finish
+        self.frame_queue.put(None)
+        self.writer_thread.join()
 
-        # Save each frame as a PNG
-        for i, state in enumerate(self.history):
-            self.loss_curve.setData(state['loss_x'], state['loss_y'])
-            self.scatter.setData(state['pos'][:, 0], state['pos'][:, 1], size=state['sizes'])
-            
-            # Repaint Header for GIF
-            accent = THEME['accent']
-            text_color = THEME['text_light']
-            spacer = '&nbsp;' * 10
-            formatted_text = (
-                f'<span style="color: {text_color};">Iteration:</span> '
-                f'<b style="color: {accent};">{state["it"]}</b>{spacer}'
-                f'<span style="color: {text_color};">Gaussians:</span> '
-                f'<b style="color: {accent};">{len(state["pos"])}</b>'
-            )
-            self.header_banner.setText(formatted_text)
-            
-            if state['map'] is not None:
-                if hasattr(self, 'gt_levels'):
-                    self.img_map_item.setImage(state['map'], levels=self.gt_levels)
-                else:
-                    self.img_map_item.setImage(state['map'], autoLevels=True)
-            
-            self.app.processEvents()
-            
-            frame_path = os.path.join(temp_dir, f"frame_{i:05d}.png")
-            
-            # Native PyQt frame grabber capturing the full window
-            pixmap = self.main_win.grab()
-            pixmap.save(frame_path, "PNG")
-            frame_paths.append(frame_path)
+        print(f"Generating GIF from {self.frame_count} frames...")
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
         # Create GIF from saved frames using ffmpeg
-        input_pattern = f"{temp_dir}/frame_%05d.png"
-        
+        input_pattern = f"{self.temp_dir}/frame_%05d.png"
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
         subprocess.run([
             ffmpeg_exe, '-y', '-framerate', '10', 
             '-loglevel', 'error',
@@ -343,5 +332,5 @@ class LiveVisualizer:
         ], check=True)
         print(f"[+] Training GIF saved in: {filepath}")
             
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
         self.main_win.close()
