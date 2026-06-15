@@ -43,33 +43,48 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
     local_ssim = {m: {b: 0.0 for b in num_beams_list} for m in methods}
     local_time = {m: {b: 0.0 for b in num_beams_list} for m in methods}
 
+    # We generate simulation data ONCE, with maximum number of beams
+    cfg.sim.num_beams = max(num_beams_list)
     base_sim_data = generate_simulation_data(cfg)
     gt_img = base_sim_data.img_gt
 
-    # --- WARM-UP (Prevents Cold Start Penalty) ---
-    # We do a tiny, untimed run to wake up PyTorch and SciPy memory allocators
+    # --- WARM-UP ---
+    # Execute a tiny, untimed run to wake up PyTorch and SciPy and prevent cold start penalty
     print(f"[Worker Process] -> Warming up Seed: {seed}...", flush=True)
-    _warmup_cfg = copy.deepcopy(cfg)
-    _warmup_cfg.train.iterations = 5 # Just 5 iterations
-    _warmup_sim = SimulationData(
+    warmup_cfg = copy.deepcopy(cfg)
+    warmup_res =  20
+    warmup_cfg.sim.cell_size = warmup_cfg.sim.map_size[0] / warmup_res
+    warmup_cfg.train.iterations = 5 # Just 5 iterations
+    
+    warmup_sim = SimulationData(
         beams=base_sim_data.beams[:10],
         measurements=base_sim_data.measurements[:10],
         y_true=base_sim_data.y_true[:10],
         img_gt=gt_img
     )
-    _func = AVAILABLE_METHODS["Gas Splatting"]["func"]
-    _func(system_matrix=None, measurements=_warmup_sim.measurements.cpu().numpy(), 
-          sim_data=_warmup_sim, cfg=_warmup_cfg, setup_time=0.0)
+    warmup_matrix = create_system_matrix_sparse(
+        (warmup_res, warmup_res), 
+        warmup_sim.beams.tolist(), 
+        warmup_cfg.sim.cell_size
+    ).tocsr()
+
+    func = AVAILABLE_METHODS["Gas Splatting"]["func"]
+    func(
+        system_matrix=warmup_matrix,
+        sim_data=warmup_sim, 
+        cfg=warmup_cfg, 
+        matrix_setup_time=0.0
+    )
     # ---------------------------------------------
     
     for n_beams in num_beams_list:
+        # We select only the number of beams we need for this iteration
         sim_data = SimulationData(
             beams=base_sim_data.beams[:n_beams],
             measurements=base_sim_data.measurements[:n_beams],
             y_true=base_sim_data.y_true[:n_beams],
             img_gt=gt_img
         )
-        measurements = sim_data.measurements.cpu().numpy()
 
         grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
         grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
@@ -83,11 +98,10 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
             func = AVAILABLE_METHODS[method_name]["func"]
             
             res_img, total_time = func(
-                system_matrix=system_matrix, 
-                measurements=measurements, 
+                system_matrix=system_matrix,
                 sim_data=sim_data, 
                 cfg=cfg, 
-                setup_time=matrix_setup_time
+                matrix_setup_time=matrix_setup_time
             )
             
             local_time[method_name][n_beams] = total_time
@@ -96,31 +110,47 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
             local_ssim[method_name][n_beams] = ssim(gt_img, res_img, data_range=data_range)
 
     print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
+
+    # Prevent GPU OOM errors in long multi-seed pools
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     return seed, local_rmse, local_ssim, local_time
 
 
 def main():
-    # --- Configuration ---
-    num_beams_list = [10, 20, 30, 40, 50, 60] 
-
-    methods = list(AVAILABLE_METHODS.keys())
-    
-    # Global structures to collect the outputs from the parallel processes
-    results_rmse = {m: {b: [] for b in num_beams_list} for m in methods}
-    results_ssim = {m: {b: [] for b in num_beams_list} for m in methods}
-    results_time = {m: {b: [] for b in num_beams_list} for m in methods}
-
+    # --- Configuration --- 
     parser = ArgumentParser(description="Compare methods results when the number of beams changes")
     parser.add_arguments(ExperimentConfig, dest="cfg")
+    parser.add_argument(
+        "--num_beams_list",
+        dest="num_beams_list",
+        nargs="+",  # 1 or more values
+        type=int,
+        default=[10, 20, 30, 40, 50, 60],
+        help="List of number of beams to test"
+    )
     args = parser.parse_args()
     cfg: ExperimentConfig = args.cfg
 
-    cfg.sim.num_beams = num_beams_list[-1]
+    num_beams_list = args.num_beams_list
 
     num_seeds = cfg.num_seeds
     seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
+    # Deactivate tomo methods progress bar
     tm.tqdm = lambda x, **kwargs: x
+
+    # Deactivate live visualization and model evaluation
+    cfg.train.do_eval = False
+    cfg.train.live_vis = False
+
+    methods = list(AVAILABLE_METHODS.keys())
+
+    # Global structures to collect the outputs from the parallel processes
+    results_rmse = {m: {b: [] for b in num_beams_list} for m in methods}
+    results_ssim = {m: {b: [] for b in num_beams_list} for m in methods}
+    results_time = {m: {b: [] for b in num_beams_list} for m in methods}
 
     print(f"Starting experiment: {len(num_beams_list)} beam configurations x {len(seeds)} seeds.")
 

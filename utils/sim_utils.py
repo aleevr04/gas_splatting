@@ -5,7 +5,6 @@ import numpy as np
 from tqdm import tqdm
 from dataclasses import dataclass
 from shapely.geometry import LineString, Polygon
-from shapely.ops import unary_union
 from scipy.sparse import dok_matrix
 from scipy.ndimage import gaussian_filter
 

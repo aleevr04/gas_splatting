@@ -65,10 +65,9 @@ def main():
         
         res_img, total_time = func(
             system_matrix=system_matrix, 
-            measurements=measurements, 
             sim_data=sim_data, 
             cfg=cfg, 
-            setup_time=matrix_setup_time
+            matrix_setup_time=matrix_setup_time
         )
 
         reconstructions[method_name] = res_img

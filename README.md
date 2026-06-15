@@ -32,7 +32,7 @@ To evaluate the effectiveness of **Gas Splatting**, it is compared against tradi
 | LTD | 0.0723 | 0.4760 | 1.23 |
 | **Gas Splatting** | **0.0311** | **0.9045** | 3.51 |
 
-*Note: While Gas Splatting requires slightly more computational time, it achieves a significantly higher reconstruction quality (SSIM) and lower error (RMSE) compared to baseline methods.*
+*Note: While Gas Splatting requires more computational time, it achieves a significantly higher reconstruction quality (SSIM) and lower error (RMSE) compared to baseline methods.*
 
 ## 🗂️ Repository Structure
 
@@ -134,19 +134,19 @@ python [script] --help
 
 ### Examples
 
-Running a simulation with 50 TDLAS beams and changing the maximum training iterations to 2000:
+Run a custom simulation with 50 beams and a maximum of 2000 training iterations::
 
 ```bash
 python main.py --num_beams 50 --iterations 2000
 ```
 
-Running grid resolution experiment with 20 seeds and a cell size of 0.5 meters:
+Evaluate grid resolution performance across 20 random seeds using a 0.5m cell size:
 
 ```bash
 python scripts/grid_resolution.py --num_seeds 20 --cell_size 0.5
 ```
 
-Running training using different learning rates for position and concentration, launching the live visualization:
+Train the model using custom learning rates and enable real-time visualization:
 
 ```bash
 python main.py --pos_lr 0.005 --concentration_lr 0.002 --live_vis
@@ -158,7 +158,7 @@ python main.py --pos_lr 0.005 --concentration_lr 0.002 --live_vis
 
 ## 📜 Acknowledgements and License
 
-This project introduces custom implementations and novel features developed specifically for **Gas Splatting**. However, the core architecture and several foundational utilities are deeply inspired by and built upon the open-source repository [r2_gaussian](https://github.com/ruyi-zha/r2_gaussian), which in turn is a derivative of the original 3D Gaussian Splatting implementation by Inria and MPII.
+This project introduces custom implementations and novel features developed specifically for **Gas Splatting**. However, the core architecture and some of its utilities are deeply inspired by and built upon the open-source repository [r2_gaussian](https://github.com/ruyi-zha/r2_gaussian), which in turn is a derivative of the original 3D Gaussian Splatting implementation by Inria and MPII.
 
 Because this repository contains derivative work, it is distributed under the identical **Gaussian-Splatting License**. 
 

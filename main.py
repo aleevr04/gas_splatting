@@ -35,11 +35,9 @@ def main():
     trainer = Trainer(model, cfg)
 
     print("Starting Gas Splatting training...")
-    t0 = time.time()
     results = trainer.train(sim_data)
-    train_time = time.time() - t0
     print(f"Loss: {results.loss_history[-1]:.6f}")
-    print(f"Setup Time: {setup_time:.3f} | Training Time: {train_time:.3f}")
+    print(f"Setup Time: {setup_time:.3f} | Training Time: {results.training_time:.3f}")
 
     # --- Plot Results ---
     plot_training_results(model, sim_data, results, cfg)
@@ -56,7 +54,7 @@ def main():
         "initial_gaussians": model.initial_gaussians,
         "final_gaussians": model.num_gaussians,
         "setup_time": setup_time,
-        "training_time": train_time,
+        "training_time": results.training_time,
         "loss_history": results.loss_history,
         "rmse_history": results.rmse_history,
         "densify_history": results.densify_history

@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -18,6 +19,7 @@ class TrainingResults:
     loss_history: List[float] = field(default_factory=list)
     densify_history: Dict[int, dict] = field(default_factory=dict)
     rmse_history: Dict[int, float] = field(default_factory=dict)
+    training_time: float = 0.0
 
 
 def get_exp_lr_func(lr_init, lr_final, max_steps):
@@ -95,8 +97,12 @@ class Trainer:
         best_ema_loss = float('inf')
         patience_counter = 0
 
+        # Training timer
+        total_train_time = 0.0
+
         pbar = tqdm(range(self.cfg.train.iterations), desc="Training", dynamic_ncols=True)        
         for it in pbar:
+            t_start = time.time()
             self.optimizer.zero_grad()
             
             y_pred = self.model(sim_data.beams)
@@ -131,15 +137,26 @@ class Trainer:
                     
                 # Halt if patience runs out
                 if patience_counter >= self.cfg.train.early_stopping_patience:
+                    total_train_time += (time.time() - t_start) # Add iteration time before breaking
                     tqdm.write(f"Early stopping triggered at iteration {it} (EMA Loss stalled at {ema_loss:.5f})")
                     break 
             # ----------------------------
+
+            # --- Densification ---
+            is_densifying = self.is_densify_it(it)
+            if is_densifying:
+                with torch.no_grad():
+                    stats = self.model.densify_and_prune(self.optimizer)
+                results.densify_history[it] = stats
+            # -------------------------
+
+            total_train_time += (time.time() - t_start)
 
             if it % 100 == 0:
                 pbar.set_postfix({'loss': f'{current_loss:.5f}'})
             
             # --- Real time visualization ---
-            if self.visualizer and it % 20 == 0:
+            if self.visualizer and (it % 20 == 0 or is_densifying):
                 self.visualizer.update(
                     iteration=it, 
                     loss_history=results.loss_history, 
@@ -156,26 +173,13 @@ class Trainer:
                 results.rmse_history[it] = rmse
             # ----------------------------
 
-            # --- Densification ---
-            if self.is_densify_it(it):
-                with torch.no_grad():
-                    stats = self.model.densify_and_prune(self.optimizer)
-                results.densify_history[it] = stats
-
-                # Force a visualizer update to see the change
-                if self.visualizer:
-                    self.visualizer.update(
-                        iteration=it, 
-                        loss_history=results.loss_history,
-                        model=self.model
-                    )
-            # -------------------------
-
         pbar.close()
         
         if self.visualizer:
             # Save Training GIF
             os.makedirs("plots", exist_ok=True)
             self.visualizer.save_gif()
+
+        results.training_time = total_train_time
 
         return results

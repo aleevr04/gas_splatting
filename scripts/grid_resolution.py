@@ -37,29 +37,27 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
     cfg = copy.deepcopy(base_cfg)
     cfg.sim.seed = seed
 
-    # --- WARM-UP (Prevents Cold Start Penalty) ---
-    # We do a tiny, untimed run to wake up PyTorch and SciPy memory allocators.
-    # We also build a small sparse matrix to warm up the SciPy C-backend.
+    # --- WARM-UP ---
+    # Execute a tiny, untimed run to wake up PyTorch and SciPy and prevent cold start penalty
     print(f"[Worker Process] -> Warming up Seed: {seed}...", flush=True)
-    _warmup_cfg = copy.deepcopy(cfg)
-    _warmup_res = 20  # Use the smallest resolution for speed
-    _warmup_cfg.sim.cell_size = _warmup_cfg.sim.map_size[0] / _warmup_res
-    _warmup_cfg.train.iterations = 5  # Just 5 iterations
+    warmup_cfg = copy.deepcopy(cfg)
+    warmup_res = 20
+    warmup_cfg.sim.cell_size = warmup_cfg.sim.map_size[0] / warmup_res
+    warmup_cfg.train.iterations = 5
     
-    _warmup_sim = generate_simulation_data(_warmup_cfg)
-    _warmup_matrix = create_system_matrix_sparse(
-        (_warmup_res, _warmup_res), 
-        _warmup_sim.beams.tolist(), 
-        _warmup_cfg.sim.cell_size
+    warmup_sim = generate_simulation_data(warmup_cfg)
+    warmup_matrix = create_system_matrix_sparse(
+        (warmup_res, warmup_res), 
+        warmup_sim.beams.tolist(), 
+        warmup_cfg.sim.cell_size
     ).tocsr()
     
-    _func = AVAILABLE_METHODS["Gas Splatting"]["func"]
-    _func(
-        system_matrix=_warmup_matrix, 
-        measurements=_warmup_sim.measurements.cpu().numpy(), 
-        sim_data=_warmup_sim, 
-        cfg=_warmup_cfg, 
-        setup_time=0.0
+    func = AVAILABLE_METHODS["Gas Splatting"]["func"]
+    func(
+        system_matrix=warmup_matrix,
+        sim_data=warmup_sim, 
+        cfg=warmup_cfg, 
+        matrix_setup_time=0.0
     )
     # ----------------------------------------------------
     
@@ -75,7 +73,6 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
         # In this experiment, since the grid resolution changes, the dimensions 
         # of the Ground Truth image also change. We MUST regenerate the simulation.
         sim_data = generate_simulation_data(cfg)
-        measurements = sim_data.measurements.cpu().numpy()
         gt_img = sim_data.img_gt
 
         grid_size = (res, res)
@@ -90,10 +87,9 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
             
             res_img, total_time = func(
                 system_matrix=system_matrix, 
-                measurements=measurements, 
                 sim_data=sim_data, 
                 cfg=cfg, 
-                setup_time=matrix_setup_time
+                matrix_setup_time=matrix_setup_time
             )
 
             local_time[method_name][res] = total_time
@@ -102,31 +98,47 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
             local_ssim[method_name][res] = ssim(gt_img, res_img, data_range=data_range)
 
     print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
+
+    # Prevent GPU OOM errors in long multi-seed pools
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     return seed, local_rmse, local_ssim, local_time
 
 
 def main():
     # --- Configuration ---
-    resolutions = [20, 30, 40, 60, 80]
-
-    # Pull methods directly from the central registry
-    methods = list(AVAILABLE_METHODS.keys())
-    
-    # Global structures to collect the outputs from the parallel processes
-    results_rmse = {m: {r: [] for r in resolutions} for m in methods}
-    results_ssim = {m: {r: [] for r in resolutions} for m in methods}
-    results_time = {m: {r: [] for r in resolutions} for m in methods}
-
     parser = ArgumentParser(description="Compare methods results when grid resolution grows")
     parser.add_arguments(ExperimentConfig, dest="cfg")
+    parser.add_argument(
+        "--resolutions",
+        dest="resolutions",
+        nargs="+",  # 1 or more values
+        type=int,
+        default=[20, 30, 40, 60, 80],
+        help="List of resolutions (MxM) to test"
+    )
     args = parser.parse_args()
     cfg: ExperimentConfig = args.cfg
+
+    resolutions = args.resolutions
 
     num_seeds = cfg.num_seeds
     seeds = np.random.randint(0, 100000, size=num_seeds).tolist()
 
     # Deactivate tomo methods progress bar
     tm.tqdm = lambda x, **kwargs: x
+
+    # Deactivate live visualization and model evaluation
+    cfg.train.do_eval = False
+    cfg.train.live_vis = False
+
+    methods = list(AVAILABLE_METHODS.keys())
+    
+    # Global structures to collect the outputs from the parallel processes
+    results_rmse = {m: {r: [] for r in resolutions} for m in methods}
+    results_ssim = {m: {r: [] for r in resolutions} for m in methods}
+    results_time = {m: {r: [] for r in resolutions} for m in methods}
 
     print(f"Starting experiment: {len(resolutions)} resolutions x {len(seeds)} seeds.")
 
