@@ -53,8 +53,8 @@ def run_gas_splatting(system_matrix: csr_matrix, sim_data: SimulationData, cfg: 
     gs_setup_time = time.time() - t_start
 
     trainer = Trainer(model, cfg)
-    results = trainer.train(sim_data)
-    
+    trainer.train(sim_data)
+    results = trainer.finish()
     gs_img = model.render_map(cell_size=cfg.sim.cell_size)
     
     return gs_img, gs_setup_time + results.training_time

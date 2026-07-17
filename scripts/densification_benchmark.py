@@ -17,6 +17,7 @@ from utils.sim_utils import generate_simulation_data
 from utils.init_utils import setup_gs_model
 from utils.plot_utils import set_publication_style
 from utils.data_utils import save_experiment_results
+from utils.methods_registry import run_gas_splatting
 
 def rmse_loss(img_gt, img_pred):
     return np.sqrt(np.mean((img_pred - img_gt)**2))
@@ -43,6 +44,7 @@ def evaluate_single_seed(seed, base_cfg, methods):
     _model, _, _ = setup_gs_model(_warmup_sim, _warmup_cfg)
     _trainer = Trainer(_model, _warmup_cfg)
     _trainer.train(_warmup_sim)
+    _trainer.finish()
     # ---------------------------------------------
     
     # Real data generation for this seed
@@ -63,11 +65,12 @@ def evaluate_single_seed(seed, base_cfg, methods):
         # Setup model
         t_start = time.time()
         model, _, _ = setup_gs_model(sim_data, test_cfg)
+        setup_time = time.time() - t_start
         
         # Train
         trainer = Trainer(model, test_cfg)
         trainer.train(sim_data)
-        elapsed_time = time.time() - t_start
+        results = trainer.finish()
         
         # Evaluate
         gs_img = model.render_map(cell_size=test_cfg.sim.cell_size)
@@ -79,7 +82,7 @@ def evaluate_single_seed(seed, base_cfg, methods):
         local_results["rmse"][method] = rmse
         local_results["ssim"][method] = ssim_val
         local_results["gaussians"][method] = model.num_gaussians
-        local_results["time"][method] = elapsed_time
+        local_results["time"][method] = setup_time + results.training_time
 
     print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
     return seed, local_results

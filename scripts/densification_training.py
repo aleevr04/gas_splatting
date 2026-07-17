@@ -41,8 +41,9 @@ def main():
         model, _, _ = setup_gs_model(sim_data, test_cfg)
         trainer = Trainer(model, test_cfg)
         
-        train_results = trainer.train(sim_data)
-        
+        trainer.train(sim_data)
+        train_results = trainer.finish()
+
         # Render the final 2D image
         gs_img = model.render_map(cell_size=test_cfg.sim.cell_size)
         

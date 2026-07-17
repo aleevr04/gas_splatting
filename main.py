@@ -35,7 +35,8 @@ def main():
     trainer = Trainer(model, cfg)
 
     print("Starting Gas Splatting training...")
-    results = trainer.train(sim_data)
+    trainer.train(sim_data)
+    results = trainer.finish()
     print(f"Loss: {results.loss_history[-1]:.6f}")
     print(f"Setup Time: {setup_time:.3f} | Training Time: {results.training_time:.3f}")
 

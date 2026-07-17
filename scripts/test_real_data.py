@@ -112,7 +112,8 @@ def main():
 
     # Training
     trainer = Trainer(model, cfg)
-    results = trainer.train(sim_data)
+    trainer.train(sim_data)
+    results = trainer.finish()
     # ------------------------------------------------
 
     # Plot results
