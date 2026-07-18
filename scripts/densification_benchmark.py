@@ -2,12 +2,9 @@ import os
 import sys
 import copy
 import time
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from simple_parsing import ArgumentParser
-from skimage.metrics import structural_similarity as ssim
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -16,36 +13,27 @@ from trainer import Trainer
 from utils.sim_utils import generate_simulation_data
 from utils.init_utils import setup_gs_model
 from utils.plot_utils import set_publication_style
-from utils.data_utils import save_experiment_results
-from utils.methods_registry import run_gas_splatting
-
-def rmse_loss(img_gt, img_pred):
-    return np.sqrt(np.mean((img_pred - img_gt)**2))
+from utils.experiment_utils import (
+    setup_worker_env, 
+    warmup_worker, 
+    calculate_metrics, 
+    merge_local_results,
+    yield_parallel_experiment,
+    save_experiment_results
+)
 
 def evaluate_single_seed(seed, base_cfg, methods):
     """
     Isolated function to evaluate a single seed for the split comparison.
     Runs in an independent worker process.
     """
-    # CRITICAL! Prevent PyTorch/NumPy from crashing the CPU with too many threads
-    torch.set_num_threads(1)
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-
-    print(f"[Worker Process] -> Starting Seed: {seed}", flush=True)
+    setup_worker_env()
     
     cfg = copy.deepcopy(base_cfg)
     cfg.sim.seed = seed
+    warmup_worker(cfg, seed)
     
-    # --- WARM-UP (Prevents Cold Start Penalty) ---
-    _warmup_cfg = copy.deepcopy(cfg)
-    _warmup_cfg.train.iterations = 2 
-    _warmup_sim = generate_simulation_data(_warmup_cfg)
-    _model, _, _ = setup_gs_model(_warmup_sim.batch, _warmup_cfg)
-    _trainer = Trainer(_model, _warmup_cfg)
-    _trainer.train(_warmup_sim.batch)
-    _trainer.finish()
-    # ---------------------------------------------
+    print(f"[Worker Process] -> Starting Seed: {seed}", flush=True)
     
     # Real data generation for this seed
     sim_data = generate_simulation_data(cfg)
@@ -59,25 +47,22 @@ def evaluate_single_seed(seed, base_cfg, methods):
     }
     
     for method in methods:
-        test_cfg = copy.deepcopy(cfg)
-        test_cfg.densify.original_dens = (method == "Original Densification")
+        cfg.densify.original_dens = (method == "Original Densification")
         
         # Setup model
         t_start = time.time()
-        model, _, _ = setup_gs_model(sim_data.batch, test_cfg)
+        model, _, _ = setup_gs_model(sim_data.batch, cfg)
         setup_time = time.time() - t_start
         
         # Train
-        trainer = Trainer(model, test_cfg)
+        trainer = Trainer(model, cfg)
         trainer.train(sim_data.batch)
         results = trainer.finish()
         
         # Evaluate
-        gs_img = model.render_map(cell_size=test_cfg.sim.cell_size)
+        gs_img = model.render_map(cell_size=cfg.sim.cell_size)
         
-        rmse = rmse_loss(gt_img, gs_img)
-        data_range = gt_img.max() - gt_img.min()
-        ssim_val = ssim(gt_img, gs_img, data_range=data_range)
+        rmse, ssim_val = calculate_metrics(gt_img, gs_img)
         
         local_results["rmse"][method] = rmse
         local_results["ssim"][method] = ssim_val
@@ -92,7 +77,6 @@ def plot_densification_comparison(methods, results, save_path):
     Generates a 2x2 bar chart to compare densification methods directly.
     """
     fig, axes = plt.subplots(2, 2, figsize=(9, 8)) 
-    
     axes = axes.flatten() 
 
     metrics = [
@@ -155,22 +139,15 @@ def main():
     
     print(f"Starting experiment: comparing densification methods across {len(seeds)} seeds.")
     
-    # --- Parallelization ---
-    max_workers=4
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(evaluate_single_seed, seed, cfg, methods): seed 
-            for seed in seeds
-        }
-        
-        for future in as_completed(futures):
-            seed, local_results = future.result()
-            
-            for m in methods:
-                results["rmse"][m].append(local_results["rmse"][m])
-                results["ssim"][m].append(local_results["ssim"][m])
-                results["gaussians"][m].append(local_results["gaussians"][m])
-                results["time"][m].append(local_results["time"][m])
+    # --- Shared execution loop ---
+    for seed, local_results in yield_parallel_experiment(
+        worker_func=evaluate_single_seed,
+        seeds=seeds,
+        max_workers=4,
+        base_cfg=cfg,
+        methods=methods
+    ):
+        merge_local_results(results, local_results)
 
     # --- Print Summary ---
     print("\n--- Final Results (Averaged across seeds) ---")
@@ -186,15 +163,14 @@ def main():
         print(f"  Avg Time:      {avg_time:.2f}s\n")
 
     # --- Save Data ---
-    metadata = {
+    save_experiment_results({
         "experiment_name": "densification_methods_comparison",
         "methods": methods,
         "seeds": seeds,
         "map_size": cfg.sim.map_size,
         "cell_size": cfg.sim.cell_size,
         "num_beams": cfg.sim.num_beams
-    }
-    save_experiment_results(metadata, results)
+    }, results)
 
     # --- Generate Plots ---
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'densification_comparison.png')

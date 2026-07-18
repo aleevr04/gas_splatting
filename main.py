@@ -6,7 +6,7 @@ from trainer import Trainer
 from utils.init_utils import setup_gs_model
 from utils.plot_utils import plot_initial_guess, plot_training_results, set_publication_style
 from utils.sim_utils import generate_simulation_data
-from utils.data_utils import save_experiment_results
+from utils.experiment_utils import save_experiment_results
 
 def main():
     # --- Configuration ---
