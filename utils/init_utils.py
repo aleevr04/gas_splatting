@@ -7,7 +7,7 @@ from skimage.feature import peak_local_max
 from config import Config
 from gs_model import GasSplattingModel
 from utils.sim_utils import (
-    SimulationData,
+    MeasurementBatch,
     create_system_matrix_sparse,
     cell2xy
 )
@@ -92,12 +92,12 @@ def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float]
             torch.tensor(std, dtype=torch.float32), 
             img_coarse)
 
-def setup_gs_model(sim_data: SimulationData, cfg: Config):
+def setup_gs_model(batch: MeasurementBatch, cfg: Config):
     """
     Initializes Gas Splatting model using simulation data.
 
     Args:
-        sim_data (SimulationData): Simulation data containing beams and measurements.
+        batch (MeasurementBatch): Batch containing beams geometry and their measurements.
         cfg (Config): Configuration object with model and simulation parameters.
 
     Returns:
@@ -111,8 +111,8 @@ def setup_gs_model(sim_data: SimulationData, cfg: Config):
     coarse_cell_size = cfg.init.coarse_proportion * max_dim
 
     init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
-        sim_data.beams.tolist(), 
-        sim_data.measurements, 
+        batch.beams.tolist(), 
+        batch.measurements, 
         cfg.sim.map_size, 
         min_gaussians=cfg.init.min_gaussians,
         coarse_cell_size=coarse_cell_size

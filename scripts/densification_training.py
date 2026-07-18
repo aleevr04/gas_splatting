@@ -24,7 +24,7 @@ def main():
     base_cfg.train.early_stopping_patience = base_cfg.train.iterations # Deactivate early stopping
     
     sim_data = generate_simulation_data(base_cfg)
-    gt_img = sim_data.img_gt
+    gt_img = sim_data.ground_truth
     
     methods = ["Original Densification", "Proposed Strategy"]
     results = {}
@@ -38,10 +38,10 @@ def main():
         test_cfg.train.do_eval = True
         test_cfg.train.eval_interval = 25
         
-        model, _, _ = setup_gs_model(sim_data, test_cfg)
-        trainer = Trainer(model, test_cfg)
+        model, _, _ = setup_gs_model(sim_data.batch, test_cfg)
+        trainer = Trainer(model, test_cfg, ground_truth=gt_img)
         
-        trainer.train(sim_data)
+        trainer.train(sim_data.batch)
         train_results = trainer.finish()
 
         # Render the final 2D image

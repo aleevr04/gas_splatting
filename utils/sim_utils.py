@@ -12,11 +12,24 @@ from config import Config
 
 
 @dataclass
+class MeasurementBatch:
+    """
+    Sensor readings and their geometries.
+    """
+    beams: torch.Tensor         # Shape: (N, 2, 2)
+    measurements: torch.Tensor  # Shape: (N,)
+
+@dataclass
 class SimulationData:
-    beams: torch.Tensor
-    img_gt: np.ndarray
-    measurements: torch.Tensor
-    y_true: torch.Tensor
+    """
+    Represents a complete simulated world. 
+    It holds the ground truth and the resulting sensor readings.
+    """
+    ground_truth: np.ndarray    # Shape: (H, W)
+    batch: MeasurementBatch
+    
+    # Noise-free measurements
+    y_true: torch.Tensor        # Shape: (N,)
 
 
 # ==========================================
@@ -336,8 +349,7 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
         measurements = y_true
 
     return SimulationData(
-        beams=beams_tensor,
-        img_gt=img_gt,
-        measurements=measurements,
+        ground_truth=img_gt,
+        batch=MeasurementBatch(beams=beams_tensor, measurements=measurements),
         y_true=y_true
     )

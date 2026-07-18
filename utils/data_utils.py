@@ -12,6 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import Config
 from utils.sim_utils import (
     SimulationData, 
+    MeasurementBatch,
     xy2cell, 
     simulate_gas_integrals, 
     generate_random_beams, 
@@ -41,9 +42,10 @@ def save_experiment_results(metadata, results, folder="results"):
     print(f"[+] Experiment results saved in: {filepath}")
     return filepath
 
-def load_real_tdlas_data(filepath, cfg: Config) -> SimulationData:
+def load_real_tdlas_data(filepath, cfg: Config) -> MeasurementBatch:
     """
-    Extracts real simulation data from a given file. It also updates config map size properly.
+    Extracts real measurements from a file and returns a MeasurementBatch. 
+    It also updates the config map size properly.
     """
     beams_list = []
     measurements_list = []
@@ -61,7 +63,7 @@ def load_real_tdlas_data(filepath, cfg: Config) -> SimulationData:
             # Concentration reading
             ppmxm = float(data['reading']['average_ppmxm'])
             
-            # 2D proyection
+            # 2D projection
             len_3d = math.hypot(math.hypot(rx - sx, ry - sy), rz - sz)
             len_2d = math.hypot(rx - sx, ry - sy)
             
@@ -98,15 +100,10 @@ def load_real_tdlas_data(filepath, cfg: Config) -> SimulationData:
     map_h = grid_h * cfg.sim.cell_size
     cfg.sim.map_size = (map_w, map_h)
 
-    # Empty ground truth
-    img_gt = np.zeros((grid_h, grid_w))
-
-    # Build simulation data
-    return SimulationData(
+    # Return exclusively the raw measurements
+    return MeasurementBatch(
         beams=beams_tensor,
-        img_gt=img_gt,
-        measurements=measurements_tensor,
-        y_true=measurements_tensor
+        measurements=measurements_tensor
     )
 
 def build_custom_real_scenario(
@@ -114,16 +111,17 @@ def build_custom_real_scenario(
     real_data_path: str, 
     use_sim_beams: bool = True, 
     use_sim_gas: bool = False
-) -> SimulationData:
+): 
+    # Returns Union[MeasurementBatch, SimulationData] depending on use_sim_gas
     
     if use_sim_beams and not use_sim_gas:
         raise ValueError(
             "Invalid combination: Synthetic beams require a simulated gas map to compute meaningful measurements."
         )
 
-    # Load real data
+    # Load real data batch
     if os.path.exists(real_data_path):
-        sim_data = load_real_tdlas_data(real_data_path, cfg)
+        batch = load_real_tdlas_data(real_data_path, cfg)
     else:
         raise FileNotFoundError(f"Real data path is missing or invalid: {real_data_path}")
 
@@ -134,10 +132,12 @@ def build_custom_real_scenario(
         beams += generate_random_beams(cfg.sim.map_size, num_random_beams)
         beams += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
         
-        sim_data.beams = torch.tensor(beams, dtype=torch.float32, device=cfg.device)
+        batch.beams = torch.tensor(beams, dtype=torch.float32, device=cfg.device)
 
+    # If simulated gas is injected, we generate the ground truth and return a SimulationData object
     if use_sim_gas:
-        grid_h, grid_w = sim_data.img_gt.shape
+        grid_w = math.ceil(cfg.sim.map_size[0] / cfg.sim.cell_size)
+        grid_h = math.ceil(cfg.sim.map_size[1] / cfg.sim.cell_size)
         gas_map = np.zeros((grid_h, grid_w))
 
         source1 = (5.0, 7.0)
@@ -154,10 +154,14 @@ def build_custom_real_scenario(
         gas_map = gaussian_filter(gas_map, sigma=1.0)
         
         # Recompute measurements
-        measurements = simulate_gas_integrals(gas_map, sim_data.beams.tolist(), cfg.sim.cell_size)
+        measurements = simulate_gas_integrals(gas_map, batch.beams.tolist(), cfg.sim.cell_size)
+        batch.measurements = torch.tensor(measurements, dtype=torch.float32, device=cfg.device)
         
-        sim_data.img_gt = gas_map
-        sim_data.measurements = torch.tensor(measurements, dtype=torch.float32, device=cfg.device)
-        sim_data.y_true = sim_data.measurements
+        return SimulationData(
+            ground_truth=gas_map,
+            batch=batch,
+            y_true=batch.measurements
+        )
 
-    return sim_data
+    # If no simulation is injected, return the pure real batch
+    return batch

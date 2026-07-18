@@ -12,11 +12,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import utils.tomo_utils as tm
 from config import ExperimentConfig
-from utils.sim_utils import SimulationData
+from utils.sim_utils import MeasurementBatch
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import plot_experiment_evolution
 from utils.data_utils import save_experiment_results
-from utils.methods_registry import AVAILABLE_METHODS
+from utils.methods_registry import AVAILABLE_METHODS, run_gas_splatting
 
 def rmse_loss(img_gt, img_pred):
     return np.sqrt(np.mean((img_pred - img_gt)**2))
@@ -46,7 +46,7 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
     # We generate simulation data ONCE, with maximum number of beams
     cfg.sim.num_beams = max(num_beams_list)
     base_sim_data = generate_simulation_data(cfg)
-    gt_img = base_sim_data.img_gt
+    gt_img = base_sim_data.ground_truth
 
     # --- WARM-UP ---
     # Execute a tiny, untimed run to wake up PyTorch and SciPy and prevent cold start penalty
@@ -56,34 +56,24 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
     warmup_cfg.sim.cell_size = warmup_cfg.sim.map_size[0] / warmup_res
     warmup_cfg.train.iterations = 5 # Just 5 iterations
     
-    warmup_sim = SimulationData(
-        beams=base_sim_data.beams[:10],
-        measurements=base_sim_data.measurements[:10],
-        y_true=base_sim_data.y_true[:10],
-        img_gt=gt_img
+    warmup_batch = MeasurementBatch(
+        beams=base_sim_data.batch.beams[:10],
+        measurements=base_sim_data.batch.measurements[:10]
     )
-    warmup_matrix = create_system_matrix_sparse(
+    _ = create_system_matrix_sparse(
         (warmup_res, warmup_res), 
-        warmup_sim.beams.tolist(), 
+        warmup_batch.beams.tolist(), 
         warmup_cfg.sim.cell_size
     ).tocsr()
 
-    func = AVAILABLE_METHODS["Gas Splatting"]["func"]
-    func(
-        system_matrix=warmup_matrix,
-        sim_data=warmup_sim, 
-        cfg=warmup_cfg, 
-        matrix_setup_time=0.0
-    )
+    run_gas_splatting(batch=warmup_batch, cfg=warmup_cfg)
     # ---------------------------------------------
     
     for n_beams in num_beams_list:
         # We select only the number of beams we need for this iteration
-        sim_data = SimulationData(
-            beams=base_sim_data.beams[:n_beams],
-            measurements=base_sim_data.measurements[:n_beams],
-            y_true=base_sim_data.y_true[:n_beams],
-            img_gt=gt_img
+        batch = MeasurementBatch(
+            beams=base_sim_data.batch.beams[:n_beams],
+            measurements=base_sim_data.batch.measurements[:n_beams]
         )
 
         grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
@@ -91,16 +81,16 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
         grid_size = (grid_w, grid_h)
 
         matrix_setup_start = time.time()
-        system_matrix = create_system_matrix_sparse(grid_size, sim_data.beams.tolist(), cfg.sim.cell_size).tocsr()
+        system_matrix = create_system_matrix_sparse(grid_size, batch.beams.tolist(), cfg.sim.cell_size).tocsr()
         matrix_setup_time = time.time() - matrix_setup_start
         
         for method_name in methods:
             func = AVAILABLE_METHODS[method_name]["func"]
             
             res_img, total_time = func(
-                system_matrix=system_matrix,
-                sim_data=sim_data, 
+                batch=batch, 
                 cfg=cfg, 
+                system_matrix=system_matrix,
                 matrix_setup_time=matrix_setup_time
             )
             

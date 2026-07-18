@@ -11,10 +11,11 @@ from config import Config
 from trainer import Trainer
 from gs_model import GasSplattingModel
 from utils.init_utils import setup_gs_model
+from utils.sim_utils import SimulationData, MeasurementBatch
 from utils.data_utils import build_custom_real_scenario
 from utils.plot_utils import plot_initial_guess, set_publication_style
 
-def plot_real_results(model, sim_data, results, cfg, save_path):
+def plot_real_results(model: GasSplattingModel, batch_data: MeasurementBatch, results, cfg: Config, save_path):
     img_pred = model.render_map(cell_size=cfg.sim.cell_size)
     map_w, map_h = cfg.sim.map_size
     
@@ -34,8 +35,8 @@ def plot_real_results(model, sim_data, results, cfg, save_path):
     fig.colorbar(im, ax=ax_map, label="ppm", fraction=0.046, pad=0.04)
     
     # --- Beams ---
-    beams_np = sim_data.beams.cpu().numpy()
-    meas_np = sim_data.measurements.cpu().numpy()
+    beams_np = batch_data.beams.cpu().numpy()
+    meas_np = batch_data.measurements.cpu().numpy()
     
     # Normalize
     meas_min, meas_max = meas_np.min(), meas_np.max()
@@ -82,14 +83,21 @@ def main():
     print(f"Using device: {cfg.device}")
     
     # Load data
-    data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json')
-    
-    sim_data = build_custom_real_scenario(
+    data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json') 
+    data = build_custom_real_scenario(
         cfg=cfg,
         real_data_path=data_path,
         use_sim_beams=args.sim_beams,
         use_sim_gas=args.sim_gas
     )
+
+    # Safely extract batch and ground_truth
+    if isinstance(data, SimulationData):
+        batch = data.batch
+        gt_img = data.ground_truth
+    else:
+        batch = data
+        gt_img = None
 
     # ----- MODEL INITIALIZATION AND TRAINING ------
     if args.force_init:
@@ -103,22 +111,22 @@ def main():
         )
         grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
         grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-        plot_initial_guess(sim_data.img_gt, np.zeros((grid_h, grid_w)), init_pos,cfg)
+        plot_initial_guess(gt_img, np.zeros((grid_h, grid_w)), init_pos, cfg)
     else:
         # LQSR Initialization
-        model, init_pos, img_coarse = setup_gs_model(sim_data, cfg)
+        model, init_pos, img_coarse = setup_gs_model(batch, cfg)
         print(f"Model initialized with {model.num_gaussians} gaussians.")
-        plot_initial_guess(sim_data.img_gt, img_coarse, init_pos, cfg)
+        plot_initial_guess(gt_img, img_coarse, init_pos, cfg)
 
     # Training
     trainer = Trainer(model, cfg)
-    trainer.train(sim_data)
+    trainer.train(batch)
     results = trainer.finish()
     # ------------------------------------------------
 
     # Plot results
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'real_data_results.png')
-    plot_real_results(model, sim_data, results, cfg, save_path)
+    plot_real_results(model, batch, results, cfg, save_path)
 
 if __name__ == "__main__":
     main()

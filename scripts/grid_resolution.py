@@ -15,7 +15,7 @@ from config import ExperimentConfig
 from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
 from utils.plot_utils import plot_experiment_evolution
 from utils.data_utils import save_experiment_results
-from utils.methods_registry import AVAILABLE_METHODS
+from utils.methods_registry import AVAILABLE_METHODS, run_gas_splatting
 
 def rmse_loss(img_gt, img_pred):
     return np.sqrt(np.mean((img_pred - img_gt)**2))
@@ -46,19 +46,13 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
     warmup_cfg.train.iterations = 5
     
     warmup_sim = generate_simulation_data(warmup_cfg)
-    warmup_matrix = create_system_matrix_sparse(
+    _ = create_system_matrix_sparse(
         (warmup_res, warmup_res), 
-        warmup_sim.beams.tolist(), 
+        warmup_sim.batch.beams.tolist(), 
         warmup_cfg.sim.cell_size
     ).tocsr()
     
-    func = AVAILABLE_METHODS["Gas Splatting"]["func"]
-    func(
-        system_matrix=warmup_matrix,
-        sim_data=warmup_sim, 
-        cfg=warmup_cfg, 
-        matrix_setup_time=0.0
-    )
+    run_gas_splatting(batch=warmup_sim.batch, cfg=warmup_cfg)
     # ----------------------------------------------------
     
     # Local data structures to store the results exclusively for THIS seed
@@ -73,12 +67,12 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
         # In this experiment, since the grid resolution changes, the dimensions 
         # of the Ground Truth image also change. We MUST regenerate the simulation.
         sim_data = generate_simulation_data(cfg)
-        gt_img = sim_data.img_gt
+        gt_img = sim_data.ground_truth
 
         grid_size = (res, res)
 
         matrix_setup_start = time.time()
-        system_matrix = create_system_matrix_sparse(grid_size, sim_data.beams.tolist(), cfg.sim.cell_size).tocsr()
+        system_matrix = create_system_matrix_sparse(grid_size, sim_data.batch.beams.tolist(), cfg.sim.cell_size).tocsr()
         matrix_setup_time = time.time() - matrix_setup_start
             
         for method_name in methods:
@@ -86,9 +80,9 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
             func = method_info["func"]
             
             res_img, total_time = func(
+                batch=sim_data.batch, 
+                cfg=cfg,
                 system_matrix=system_matrix, 
-                sim_data=sim_data, 
-                cfg=cfg, 
                 matrix_setup_time=matrix_setup_time
             )
 

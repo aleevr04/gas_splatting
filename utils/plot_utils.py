@@ -30,26 +30,46 @@ def set_publication_style():
     })
 
 def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
-    """Shows ground truth and initial reconstruction image, and saves it to the plots directory"""
+    """Shows ground truth (if available) and initial reconstruction image, and saves it."""
 
     map_w, map_h = cfg.sim.map_size
 
+    # Check if ground truth exists
+    has_gt = img_gt is not None
+
+    # Determine dynamic color mapping
     vmin = 0
-    vmax = max(img_gt.max(), img_coarse.max())
+    if has_gt:
+        vmax = max(img_gt.max(), img_coarse.max())
+    else:
+        vmax = img_coarse.max()
+        
+    # Prevent matplotlib warnings if vmax is exactly 0 (e.g., during forced init with empty map)
+    vmax = vmax if vmax > 0 else 1.0 
 
-    fig = plt.figure(figsize=(12, 5))
+    if has_gt:
+        # Create a 2-panel side-by-side plot
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
-    ax1 = plt.subplot(1, 2, 1)
-    ax1.set_title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
-    im1 = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+        ax1.set_title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
+        im = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
 
-    ax2 = plt.subplot(1, 2, 2)
-    ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
-    ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
-    ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Peaks')
-    ax2.legend()
+        ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
+        ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+        ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Peaks')
+        ax2.legend()
 
-    fig.colorbar(im1, ax=[ax1, ax2], label="ppm", fraction=0.025, pad=0.05)
+        fig.colorbar(im, ax=[ax1, ax2], label="ppm", fraction=0.025, pad=0.05)
+    else:
+        # Create a single-panel plot just for the initialization
+        fig, ax2 = plt.subplots(1, 1, figsize=(7, 5))
+        
+        ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
+        im = ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+        ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Peaks')
+        ax2.legend()
+        
+        fig.colorbar(im, ax=ax2, label="ppm", fraction=0.046, pad=0.04)
 
     # Save plot instead of showing it
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'initial_guess.png')
@@ -73,10 +93,10 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     
     # Colormap min and max values
     vmin = 0
-    vmax = max(sim_data.img_gt.max(), img_pred.max())
+    vmax = max(sim_data.ground_truth.max(), img_pred.max())
 
     # RMSE
-    mse = np.mean((img_pred - sim_data.img_gt)**2)
+    mse = np.mean((img_pred - sim_data.ground_truth)**2)
     rmse = np.sqrt(mse)
 
     fig = plt.figure(figsize=(12, 8)) 
@@ -87,9 +107,9 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     # 1. GT (Top Left)
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_title(f"Ground Truth ({grid_w}x{grid_h})")
-    im1 = ax1.imshow(sim_data.img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
-    for i in range(len(sim_data.beams)):
-        (x0, y0), (x1, y1) = sim_data.beams[i]
+    im1 = ax1.imshow(sim_data.ground_truth, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+    for i in range(len(sim_data.batch.beams)):
+        (x0, y0), (x1, y1) = sim_data.batch.beams[i]
         ax1.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
 
     # 2. Reconstruction (Top Center)

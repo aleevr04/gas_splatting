@@ -25,17 +25,17 @@ def main():
     # --- Initialization ---
     print(f"Running Least Squares initialization...")
     t0 = time.time()
-    model, init_pos, img_coarse = setup_gs_model(sim_data, cfg)
+    model, init_pos, img_coarse = setup_gs_model(sim_data.batch, cfg)
     setup_time = time.time() - t0
     print("Model initialized")
 
-    plot_initial_guess(sim_data.img_gt, img_coarse, init_pos, cfg)
+    plot_initial_guess(sim_data.ground_truth, img_coarse, init_pos, cfg)
 
     # --- Training ---
-    trainer = Trainer(model, cfg)
+    trainer = Trainer(model, cfg, ground_truth=sim_data.ground_truth)
 
     print("Starting Gas Splatting training...")
-    trainer.train(sim_data)
+    trainer.train(sim_data.batch)
     results = trainer.finish()
     print(f"Loss: {results.loss_history[-1]:.6f}")
     print(f"Setup Time: {setup_time:.3f} | Training Time: {results.training_time:.3f}")

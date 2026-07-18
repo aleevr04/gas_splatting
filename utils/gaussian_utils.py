@@ -1,7 +1,7 @@
 import torch
 
 def inverse_softplus(x):
-    return torch.log(torch.exp(x) - 1)
+    return torch.where(x > 20.0, x, torch.log(torch.expm1(x)))
 
 def inverse_sigmoid(x, norm_factor):
     return torch.logit(x / norm_factor)

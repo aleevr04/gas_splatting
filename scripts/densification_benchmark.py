@@ -41,15 +41,15 @@ def evaluate_single_seed(seed, base_cfg, methods):
     _warmup_cfg = copy.deepcopy(cfg)
     _warmup_cfg.train.iterations = 2 
     _warmup_sim = generate_simulation_data(_warmup_cfg)
-    _model, _, _ = setup_gs_model(_warmup_sim, _warmup_cfg)
+    _model, _, _ = setup_gs_model(_warmup_sim.batch, _warmup_cfg)
     _trainer = Trainer(_model, _warmup_cfg)
-    _trainer.train(_warmup_sim)
+    _trainer.train(_warmup_sim.batch)
     _trainer.finish()
     # ---------------------------------------------
     
     # Real data generation for this seed
     sim_data = generate_simulation_data(cfg)
-    gt_img = sim_data.img_gt
+    gt_img = sim_data.ground_truth
     
     local_results = {
         "rmse": {},
@@ -64,12 +64,12 @@ def evaluate_single_seed(seed, base_cfg, methods):
         
         # Setup model
         t_start = time.time()
-        model, _, _ = setup_gs_model(sim_data, test_cfg)
+        model, _, _ = setup_gs_model(sim_data.batch, test_cfg)
         setup_time = time.time() - t_start
         
         # Train
         trainer = Trainer(model, test_cfg)
-        trainer.train(sim_data)
+        trainer.train(sim_data.batch)
         results = trainer.finish()
         
         # Evaluate

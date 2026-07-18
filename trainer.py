@@ -8,7 +8,7 @@ from typing import List, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import SimulationData
+from utils.sim_utils import MeasurementBatch
 from utils.live_vis import LiveVisualizer
 
 
@@ -36,10 +36,13 @@ def get_exp_lr_func(lr_init, lr_final, max_steps):
     return lr_func
 
 class Trainer:
-    def __init__(self, model: GasSplattingModel, cfg: Config, max_buffer_size: int | None = None):
+    def __init__(self, model: GasSplattingModel, cfg: Config, ground_truth: np.ndarray | None = None, max_buffer_size: int | None = None):
         self.model = model
+        self.ground_truth = ground_truth
         self.cfg = cfg
-        self.visualizer =  LiveVisualizer(cfg) if self.cfg.train.live_vis else None
+        self.visualizer = LiveVisualizer(cfg) if self.cfg.train.live_vis else None
+        if self.visualizer and ground_truth is not None: 
+            self.visualizer.set_ground_truth(ground_truth)
         self.results = TrainingResults()
         self.global_iteration = 0
         
@@ -95,7 +98,7 @@ class Trainer:
             elif param_group["name"] == "concentration":
                 param_group["lr"] = self.concentration_lr_func(iteration)
 
-    def update_buffers(self, batch_data: SimulationData):
+    def update_buffers(self, batch_data: MeasurementBatch):
         """Merges new incoming data into the training buffers, applying weight decay to older data."""
 
         if self.buffer_weights.numel() > 0:
@@ -131,10 +134,7 @@ class Trainer:
         
         return loss.item()
 
-    def train(self, batch_data: SimulationData) -> BatchResults:
-        if self.visualizer and self.global_iteration == 0:
-            self.visualizer.set_ground_truth(batch_data.img_gt)
-
+    def train(self, batch_data: MeasurementBatch) -> BatchResults:
         self.update_buffers(batch_data)
 
         # Early stopping init
@@ -200,7 +200,7 @@ class Trainer:
             # --- Model evaluation ---
             if self.cfg.train.do_eval and iteration % self.cfg.train.eval_interval == 0:
                 current_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
-                rmse = np.sqrt(np.mean((current_map - batch_data.img_gt)**2))
+                rmse = np.sqrt(np.mean((current_map - self.ground_truth)**2))
                 self.results.rmse_history[self.global_iteration] = rmse
             # ----------------------------
 

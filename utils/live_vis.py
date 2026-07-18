@@ -292,6 +292,8 @@ class LiveVisualizer:
         map_data = model.render_map(cell_size=self.cell_size).T
         if hasattr(self, 'gt_levels'):
             self.img_map_item.setImage(map_data, levels=self.gt_levels)
+        else:
+            self.img_map_item.setImage(map_data, autoLevels=True)
         self.img_map_item.setRect(QtCore.QRectF(0, 0, self.map_size[0], self.map_size[1]))
 
         self.app.processEvents()
