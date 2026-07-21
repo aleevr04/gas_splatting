@@ -4,6 +4,7 @@ import copy
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from simple_parsing import ArgumentParser
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -74,44 +75,67 @@ def evaluate_single_seed(seed, base_cfg, methods):
 
 def plot_densification_comparison(methods, results, save_path):
     """
-    Generates a 2x2 bar chart to compare densification methods directly.
+    Generates a 2x2 bar chart to compare densification methods.
     """
-    fig, axes = plt.subplots(2, 2, figsize=(9, 8)) 
+    fig, axes = plt.subplots(2, 2, figsize=(10, 9)) 
     axes = axes.flatten() 
 
     metrics = [
-        {"key": "rmse", "title": "RMSE", "ax": axes[0], "color": "skyblue"},
-        {"key": "ssim", "title": "Structural Similarity (SSIM)", "ax": axes[1], "color": "lightgreen"},
-        {"key": "gaussians", "title": "Number of Gaussians", "ax": axes[2], "color": "salmon"},
-        {"key": "time", "title": "Total Time (s)", "ax": axes[3], "color": "mediumpurple"}
+        {"key": "rmse", "title": "RMSE"},
+        {"key": "ssim", "title": "Structural Similarity (SSIM)"},
+        {"key": "gaussians", "title": "Number of Gaussians"},
+        {"key": "time", "title": "Total Time (s)"}
     ]
+
+    method_colors = {
+        "Original Densification": "skyblue",
+        "Proposed Strategy": "salmon"
+    }
 
     x_pos = np.arange(len(methods))
 
-    for metric in metrics:
-        ax = metric["ax"]
+    for idx, metric in enumerate(metrics):
+        ax = axes[idx]
         means = [np.mean(results[metric["key"]][m]) for m in methods]
         stds = [np.std(results[metric["key"]][m]) for m in methods]
 
-        bars = ax.bar(x_pos, means, yerr=stds, align='center', alpha=0.8, width=0.6,
-                      color=metric["color"], capsize=10, edgecolor='black')
+        bar_colors = method_colors.values()
+        bars = ax.bar(x_pos, means, yerr=stds, align='center', alpha=0.85, width=0.6,
+                      color=bar_colors, capsize=10, edgecolor='black', linewidth=1.2)
         
-        ax.set_title(metric["title"], pad=15)
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(methods)
+        ax.set_title(metric["title"], pad=15, fontsize=15, fontweight='bold')
+        
+        # Remove X-axis text labels completely to avoid clutter
+        ax.set_xticks([]) 
+        ax.tick_params(axis='y', labelsize=12)
         ax.yaxis.grid(True, linestyle='--', alpha=0.7)
         ax.set_axisbelow(True)
 
-        # Add values on top of the bars
+        # Add values on top of the bars with a white bounding box
         for bar in bars:
             yval = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.02 * max(means), 
-                    f'{yval:.3f}' if "rmse" in metric["key"] or "ssim" in metric["key"] else f'{yval:.1f}', 
-                    ha='center', va='bottom')
+            format_str = '{:.3f}' if metric["key"] in ["rmse", "ssim"] else '{:.1f}'
+            offset = 0.02 * max(means) if max(means) > 0 else 0.01
+            
+            ax.text(bar.get_x() + bar.get_width()/2.0, yval + offset, 
+                    format_str.format(yval), 
+                    ha='center', va='bottom', fontsize=13, fontweight='bold',
+                    bbox=dict(facecolor='white', edgecolor='none', alpha=0.85, pad=1.5))
+
+    # --- Unified Legend ---
+    legend_elements = [
+        Patch(facecolor=method_colors[m], edgecolor='black', label=m) for m in methods
+    ]
+
+    # Place the legend at the top center of the entire figure
+    fig.legend(handles=legend_elements, loc='upper center', ncol=2, fontsize=14, bbox_to_anchor=(0.5, 1.02))
 
     plt.tight_layout()
+    # Adjust the top margin to prevent the title/subplots from overlapping with the legend
+    fig.subplots_adjust(top=0.90)
+
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"\n[+] Comparison plot saved in: {save_path}")
     plt.close(fig)
 
