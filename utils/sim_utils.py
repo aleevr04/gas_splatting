@@ -30,6 +30,9 @@ class SimulationData:
     
     # Noise-free measurements
     y_true: torch.Tensor        # Shape: (N,)
+    
+    # Obstacle occupancy grid
+    obstacles: np.ndarray | None = None
 
 
 # ==========================================

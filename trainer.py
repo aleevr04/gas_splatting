@@ -36,7 +36,7 @@ def get_exp_lr_func(lr_init, lr_final, max_steps):
     return lr_func
 
 class Trainer:
-    def __init__(self, model: GasSplattingModel, cfg: Config, ground_truth: np.ndarray | None = None, max_buffer_size: int | None = None):
+    def __init__(self, model: GasSplattingModel, cfg: Config, ground_truth: np.ndarray | None = None, obstacles: np.ndarray | None = None, max_buffer_size: int | None = None):
         self.model = model
         self.ground_truth = ground_truth
         self.cfg = cfg
@@ -45,6 +45,24 @@ class Trainer:
             self.visualizer.set_ground_truth(ground_truth)
         self.results = TrainingResults()
         self.global_iteration = 0
+
+        # Process obstacle occupancy grid if provided
+        self.obs_points = None
+        if obstacles is not None:
+            # Get row, col indices of obstacles
+            rows, cols = np.where(obstacles > 0.5)
+            
+            # Convert cell indices to (x, y) coordinates in meters
+            # x = col * cell_size + cell_size/2
+            obs_x = cols * cfg.sim.cell_size + cfg.sim.cell_size / 2.0
+            obs_y = rows * cfg.sim.cell_size + cfg.sim.cell_size / 2.0
+            
+            # Store as a (n_obstacles, 2) tensor
+            self.obs_points = torch.tensor(
+                np.stack([obs_x, obs_y], axis=-1), 
+                dtype=torch.float32, 
+                device=self.cfg.device
+            )
         
         # Data Buffers
         self.max_buffer_size = max_buffer_size or float('inf')
@@ -125,14 +143,42 @@ class Trainer:
         y_pred = self.model(self.buffer_beams)
 
         # Weigthed measurements
-        loss = torch.mean(self.buffer_weights * torch.abs(y_pred - self.buffer_measurements))
-        
-        loss.backward()
+        data_loss = torch.mean(self.buffer_weights * torch.abs(y_pred - self.buffer_measurements))
+        total_loss = data_loss
+
+        # --- NEW: Obstacle Penalty Loss with Sampling ---
+        if self.obs_points is not None and self.obs_points.numel() > 0:
+            num_obs = self.obs_points.shape[0]
+            
+            # Get sampling config (default to full evaluation if not set or set to 0)
+            sample_size = getattr(self.cfg.train, 'obstacle_sample_size', 0)
+            
+            # Apply sampling if a valid size is provided and is smaller than total obstacles
+            if 0 < sample_size < num_obs:
+                indices = torch.randperm(num_obs, device=self.cfg.device)[:sample_size]
+                points_to_eval = self.obs_points[indices]
+                scaling_factor = num_obs / sample_size
+            else:
+                points_to_eval = self.obs_points
+                scaling_factor = 1.0
+                
+            # Delegate computation to the model
+            point_concentrations = self.model.compute_concentration_at_points(points_to_eval)
+            
+            # Sum the concentrations and apply scaling factor
+            total_obstacle_gas = torch.sum(point_concentrations) * scaling_factor
+            
+            # Add penalty to total loss
+            obstacle_lambda = getattr(self.cfg.train, 'obstacle_lambda', 0.1)
+            total_loss = total_loss + (obstacle_lambda * total_obstacle_gas)
+        # ------------------------------------------------
+
+        total_loss.backward()
         self.model.update_accum_gradient()
         self.update_learning_rates(iteration)
         self.optimizer.step()
         
-        return loss.item()
+        return total_loss.item()
 
     def train(self, batch_data: MeasurementBatch) -> BatchResults:
         self.update_buffers(batch_data)

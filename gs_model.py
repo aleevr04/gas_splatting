@@ -5,7 +5,6 @@ import math
 
 from config import Config
 from utils.gaussian_utils import (
-    compute_integral,
     compute_definite_integral,
     inverse_sigmoid,
     inverse_softplus
@@ -114,6 +113,47 @@ class GasSplattingModel(nn.Module):
         concentration = self.get_concentration()
 
         return compute_definite_integral(pos, covariance_inverse, concentration, beams)
+    
+    def compute_concentration_at_points(self, points: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the total gas concentration at specific 2D points.
+        
+        Args:
+            points: Tensor of shape (N, 2) containing (x, y) coordinates.
+            
+        Returns:
+            Tensor of shape (N,) containing the total concentration at each point.
+        """
+        if points.numel() == 0:
+            return torch.tensor([], device=points.device)
+            
+        # Ensure points are 2D
+        if points.dim() == 1:
+            points = points.unsqueeze(0)
+            
+        total_concentration = torch.zeros(points.shape[0], device=points.device)
+        
+        pos = self.get_pos()
+        cov_inv = self.get_covariance_inverse()
+        concentration = self.get_concentration()
+        
+        for k in range(self.num_gaussians):
+            mu = pos[k]                 # (2,)
+            sig_inv = cov_inv[k]        # (2, 2)
+            c = concentration[k]        # scalar
+            
+            # Distance from points to Gaussian center
+            d = points - mu             # (N, 2)
+            
+            # Compute Mahalanobis distance: d^T * Sigma^-1 * d
+            d_unsq = d.unsqueeze(1)     # (N, 1, 2)
+            sig_inv_exp = sig_inv.expand(points.shape[0], 2, 2)
+            
+            dist = torch.bmm(torch.matmul(d_unsq, sig_inv_exp), d_unsq.transpose(1, 2)).squeeze(-1).squeeze(-1)
+            
+            total_concentration += c * torch.exp(-0.5 * dist)
+            
+        return total_concentration
     
     def render_map(self, cell_size: float) -> np.ndarray:
         """
