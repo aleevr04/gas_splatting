@@ -42,13 +42,13 @@ class GasSplattingModel(nn.Module):
         """
 
         with torch.no_grad():
-            # --- Positions: store as logit(normalized_pos) so get_pos() -> sigmoid(_pos)*map_size
+            # Positions: store as logit(normalized_pos) so get_pos() -> sigmoid(_pos)*map_size
             if pos.shape != (self.num_gaussians, 2):
                 raise ValueError(f"pos must have shape ({self.num_gaussians}, 2), got {tuple(pos.shape)}")
 
             self._pos.data.copy_(inverse_sigmoid(pos, self.map_size))
 
-            # --- Concentration: inverse of softplus
+            # Concentration: inverse of softplus
             if concentration.dim() == 0:
                 concentration = concentration.expand(self.num_gaussians)
             elif concentration.numel() == self.num_gaussians and concentration.dim() == 1:
@@ -58,7 +58,7 @@ class GasSplattingModel(nn.Module):
 
             self._concentration.data.copy_(inverse_softplus(concentration))
 
-            # --- Scale: we store log(scale) in _scale so get_scale() = exp(_scale)
+            # Scale: we store log(scale) in _scale so get_scale() = exp(_scale)
             if std.dim() == 0:
                 scales = std * torch.ones((self.num_gaussians, 2), dtype=self._scale.dtype, device=self._scale.device)
             elif std.shape == (self.num_gaussians,):
@@ -70,35 +70,58 @@ class GasSplattingModel(nn.Module):
 
             self._scale.data.copy_(torch.log(scales))
 
-            # --- Rotation: initialize to zero (no rotation) by default
+            # Rotation: initialize to zero (no rotation) by default
             self._rotation.data.zero_()
 
     def get_pos(self):
+        """
+        Computes the positions of the Gaussians in map coordinates.
+        Returns:
+            pos: Tensor of shape (K, 2) representing the positions of the Gaussians in map coordinates.
+        """
         return torch.sigmoid(self._pos) * self.map_size
 
     def get_scale(self):
+        """
+        Computes the scale (standard deviation) of the Gaussians.
+        Returns:
+            scale: Tensor of shape (K, 2) representing the scale of the Gaussians in map coordinates.
+        """
         return torch.exp(self._scale)
 
     def get_concentration(self):
+        """
+        Computes the concentration (weight) of the Gaussians.
+        Returns:
+            concentration: Tensor of shape (K,) representing the concentration of the Gaussians."""
         return nn.functional.softplus(self._concentration)
 
     def get_rotation_matrix(self):
+        """
+        Computes the rotation matrix R for each Gaussian based on its rotation angle.
+        Returns:
+            R: Tensor of shape (K, 2, 2) representing the rotation matrices"""
         thetas = self._rotation
-        cos = torch.cos(thetas).unsqueeze(-1)  # (N, 1)
-        sin = torch.sin(thetas).unsqueeze(-1)  # (N, 1)
+        cos = torch.cos(thetas).unsqueeze(-1)  # (K, 1)
+        sin = torch.sin(thetas).unsqueeze(-1)  # (K, 1)
 
-        row1 = torch.cat([cos, -sin], dim=1)  # (N, 2)
-        row2 = torch.cat([sin, cos], dim=1)   # (N, 2)
+        row1 = torch.cat([cos, -sin], dim=1)  # (K, 2)
+        row2 = torch.cat([sin, cos], dim=1)   # (K, 2)
 
-        R = torch.stack([row1, row2], dim=1)  # (N, 2, 2)
+        R = torch.stack([row1, row2], dim=1)  # (K, 2, 2)
 
         return R
 
     def get_scale_square_inverse(self):
         scale_sq_inv = 1.0 / (self.get_scale()**2 + 1e-7)
-        return torch.diag_embed(scale_sq_inv) # (N, 2, 2)
+        return torch.diag_embed(scale_sq_inv) # (K, 2, 2)
 
     def get_covariance_inverse(self):
+        """
+        Computes the inverse covariance matrix Sigma^-1 = R * S^-2 * R^T
+        Returns:
+            covariance_inverse: Tensor of shape (K, 2, 2) representing the inverse covariance matrices of the Gaussians.
+        """
         R = self.get_rotation_matrix()
         S_sq_inv = self.get_scale_square_inverse()
 
@@ -106,6 +129,22 @@ class GasSplattingModel(nn.Module):
         covariance_inverse = torch.bmm(R, torch.bmm(S_sq_inv, R.transpose(1, 2)))
 
         return covariance_inverse
+
+    def get_covariance(self):
+        """Computes the covariance matrix Sigma = R * S^2 * R^T
+        Returns:
+            covariance: Tensor of shape (K, 2, 2) representing the covariance matrices of the Gaussians.
+        """
+        R = self.get_rotation_matrix()
+        
+        # S^2
+        scales_sq = self.get_scale()**2
+        S_sq = torch.diag_embed(scales_sq) # (K, 2, 2)
+
+        # Sigma = R * S^2 * R^T
+        covariance = torch.bmm(R, torch.bmm(S_sq, R.transpose(1, 2)))
+
+        return covariance
 
     def forward(self, beams):
         pos = self.get_pos()
@@ -157,7 +196,7 @@ class GasSplattingModel(nn.Module):
     
     def render_map(self, cell_size: float) -> np.ndarray:
         """
-        Turns gaussians into a 2D image (numpy matrix)
+        Turns Gaussians into a 2D image (numpy matrix)
         """
         # Extract dimensions from the map_size tensor
         map_w = self.map_size[0].item()
@@ -300,8 +339,8 @@ class GasSplattingModel(nn.Module):
 
     def split_original(self, optimizer: torch.optim.Optimizer, mask, N=2):
         """
-        --- ORIGINAL SPLIT ---
-        New gaussians' positions are samples of the original one.
+        Splits the original Gaussians into N new Gaussians.
+        New Gaussians' positions are sampled from the original Gaussian.
         Scale is reduced by 0.8 * N.
         Concentration is divided by N.
         """
@@ -349,8 +388,7 @@ class GasSplattingModel(nn.Module):
 
     def split_long_axis(self, optimizer: torch.optim.Optimizer, mask):
         """
-        --- Long-Axis Split ---
-        Places new gaussians symmetrically along the longest axis.
+        Places 2 new gaussians symmetrically along the longest axis.
         Concentration and scale are computed dynamically to preserve variation and mass.
         """
         N = 2
@@ -418,6 +456,11 @@ class GasSplattingModel(nn.Module):
         self.prune(optimizer, prune_mask)
 
     def densify_and_prune(self, optimizer: torch.optim.Optimizer):
+        """
+        Densifies the model by splitting/cloning Gaussians with high gradient and pruning low concentration Gaussians.
+        Returns:
+            dict: A dictionary containing the number of splits, clones, and prunes performed.
+        """
         # Gaussians with high gradient
         grads = (self.pos_grad_accum / self.denom).squeeze(1) # Average pos gradient
         grads[grads.isnan()] = 0.0

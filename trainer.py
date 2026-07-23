@@ -2,6 +2,8 @@ import os
 import time
 import torch
 import numpy as np
+import scipy.ndimage as ndimage
+import torch.nn.functional as F
 from tqdm import tqdm
 from dataclasses import dataclass, field
 from typing import List, Dict
@@ -46,23 +48,41 @@ class Trainer:
         self.results = TrainingResults()
         self.global_iteration = 0
 
-        # Process obstacle occupancy grid if provided
-        self.obs_points = None
+        # --- Process obstacles to compute SDF and gradients ---
+        self.sdf_tensor = None
+        self.sdf_grad_tensor = None
+        
         if obstacles is not None:
-            # Get row, col indices of obstacles
-            rows, cols = np.where(obstacles > 0.5)
+            free_space = (obstacles <= 0.5)
+            occupied_space = (obstacles > 0.5)
             
-            # Convert cell indices to (x, y) coordinates in meters
-            # x = col * cell_size + cell_size/2
-            obs_x = cols * cfg.sim.cell_size + cfg.sim.cell_size / 2.0
-            obs_y = rows * cfg.sim.cell_size + cfg.sim.cell_size / 2.0
+            dist_outside = np.asarray(ndimage.distance_transform_edt(free_space))
+            dist_inside = np.asarray(ndimage.distance_transform_edt(occupied_space))
             
-            # Store as a (n_obstacles, 2) tensor
-            self.obs_points = torch.tensor(
-                np.stack([obs_x, obs_y], axis=-1), 
+            # SDF field in meters
+            sdf_physical = (dist_outside - dist_inside) * cfg.sim.cell_size
+            
+            # Compute spatial gradients (normals) using numpy
+            # np.gradient returns (gradient_y, gradient_x) for a 2D array
+            grad_y, grad_x = np.gradient(sdf_physical)
+            
+            # Stack into (2, H, W)
+            sdf_grad_physical = np.stack([grad_x, grad_y], axis=0)
+            
+            # Store SDF as (1, 1, H, W)
+            self.sdf_tensor = torch.tensor(
+                sdf_physical, 
                 dtype=torch.float32, 
                 device=self.cfg.device
-            )
+            ).unsqueeze(0).unsqueeze(0)
+            
+            # Store Gradients as (1, 2, H, W)
+            self.sdf_grad_tensor = torch.tensor(
+                sdf_grad_physical,
+                dtype=torch.float32,
+                device=self.cfg.device
+            ).unsqueeze(0)
+        # ----------------------------------------------------
         
         # Data Buffers
         self.max_buffer_size = max_buffer_size or float('inf')
@@ -142,36 +162,57 @@ class Trainer:
         
         y_pred = self.model(self.buffer_beams)
 
-        # Weigthed measurements
+        # Weigthed measurements loss
         data_loss = torch.mean(self.buffer_weights * torch.abs(y_pred - self.buffer_measurements))
         total_loss = data_loss
 
-        # --- NEW: Obstacle Penalty Loss with Sampling ---
-        if self.obs_points is not None and self.obs_points.numel() > 0:
-            num_obs = self.obs_points.shape[0]
+        # Directional SDF repulsion loss
+        if self.sdf_tensor is not None and self.sdf_grad_tensor is not None:
+            pos = self.model.get_pos()                      # (K, 2)
+            Sigma = self.model.get_covariance()             # (K, 2, 2)
+            concentrations = self.model.get_concentration() # (K,)
+
+            # Normalize positions to [-1, 1] for grid sampling
+            map_w, map_h = self.model.map_size[0], self.model.map_size[1]
+            norm_x = (pos[:, 0] / map_w) * 2.0 - 1.0
+            norm_y = (pos[:, 1] / map_h) * 2.0 - 1.0
+            grid = torch.stack([norm_x, norm_y], dim=-1).view(1, 1, -1, 2) # (1, 1, K, 2)
             
-            # Get sampling config (default to full evaluation if not set or set to 0)
-            sample_size = getattr(self.cfg.train, 'obstacle_sample_size', 0)
+            # Sample SDF distance: (1, 1, 1, K) -> (K,)
+            sdf_at_pos = F.grid_sample(
+                self.sdf_tensor, grid, 
+                mode='bilinear', padding_mode='border', align_corners=False
+            ).view(-1)
             
-            # Apply sampling if a valid size is provided and is smaller than total obstacles
-            if 0 < sample_size < num_obs:
-                indices = torch.randperm(num_obs, device=self.cfg.device)[:sample_size]
-                points_to_eval = self.obs_points[indices]
-                scaling_factor = num_obs / sample_size
-            else:
-                points_to_eval = self.obs_points
-                scaling_factor = 1.0
-                
-            # Delegate computation to the model
-            point_concentrations = self.model.compute_concentration_at_points(points_to_eval)
+            # Sample SDF gradient: (1, 2, 1, K) -> (K, 2)
+            grad_at_pos = F.grid_sample(
+                self.sdf_grad_tensor, grid, 
+                mode='bilinear', padding_mode='border', align_corners=False
+            ).squeeze(0).squeeze(1).transpose(0, 1)
             
-            # Sum the concentrations and apply scaling factor
-            total_obstacle_gas = torch.sum(point_concentrations) * scaling_factor
+            # Normalize to get the unit normal vector 'n'
+            # Add small epsilon to avoid division by zero if gradient is flat
+            n = F.normalize(grad_at_pos, p=2, dim=-1, eps=1e-6) # (K, 2)
             
-            # Add penalty to total loss
+            # Calculate directional variance: n^T * Sigma * n
+            n_unsq_left = n.unsqueeze(1)  # (K, 1, 2)
+            n_unsq_right = n.unsqueeze(-1) # (K, 2, 1)
+            
+            # (K, 1, 2) @ (K, 2, 2) @ (K, 2, 1) -> (K, 1, 1) -> (K,)
+            directional_variance = torch.bmm(n_unsq_left, torch.bmm(Sigma, n_unsq_right)).view(-1)
+            
+            # Standard deviation in the direction of the wall
+            sigma_n = torch.sqrt(torch.clamp(directional_variance, min=1e-7))
+            
+            # Dynamic margin: 2 std deviations along the normal
+            margin = 2.0 * sigma_n
+            
+            # Calculate penalty
+            violations = F.relu(margin - sdf_at_pos)
+            sdf_penalty = torch.sum(violations * concentrations)
+            
             obstacle_lambda = getattr(self.cfg.train, 'obstacle_lambda', 0.1)
-            total_loss = total_loss + (obstacle_lambda * total_obstacle_gas)
-        # ------------------------------------------------
+            total_loss = total_loss + (obstacle_lambda * sdf_penalty)
 
         total_loss.backward()
         self.model.update_accum_gradient()

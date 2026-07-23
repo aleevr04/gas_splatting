@@ -118,7 +118,7 @@ def run_test(test_name: str, cfg: Config, sim_data: SimulationData):
     default_gif_path = "plots/training_evolution.gif" 
     
     if os.path.exists(default_gif_path):
-        # Clean up the test name for a safe filename (e.g., "Sampled Penalty" -> "sampled_penalty")
+        # Clean up the test name for a safe filename 
         safe_test_name = test_name.replace(" ", "_").replace("(", "").replace(")", "").lower()
         new_gif_path = f"plots/training_{safe_test_name}.gif"
         
@@ -146,6 +146,8 @@ def main():
     args = parser.parse_args()
     cfg: Config = args.cfg
     
+    print(f"Using device: {cfg.device}")
+    
     # Generate Environment
     sim_data = create_toy_environment(cfg)
     
@@ -154,23 +156,20 @@ def main():
     # --- TEST 1: Baseline (No Obstacle Penalty) ---
     cfg_baseline = copy.deepcopy(cfg)
     cfg_baseline.train.obstacle_lambda = 0.0
-    cfg_baseline.train.obstacle_sample_size = 0
     map_base, gas_base, time_base = run_test("Baseline (No Penalty)", cfg_baseline, sim_data)
     results['Baseline'] = {'map': map_base, 'gas_in_obs': gas_base, 'time': time_base}
     
-    # --- TEST 2: Full Penalty (Evaluate all obstacle points) ---
-    cfg_full = copy.deepcopy(cfg)
-    cfg_full.train.obstacle_lambda = 0.5  # Adjust weight as needed
-    cfg_full.train.obstacle_sample_size = 0 # 0 means evaluate all
-    map_full, gas_full, time_full = run_test("Full Penalty", cfg_full, sim_data)
-    results['Full Penalty'] = {'map': map_full, 'gas_in_obs': gas_full, 'time': time_full}
+    # --- TEST 2: SDF Repulsion (Lambda = 0.1) ---
+    cfg_sdf_low = copy.deepcopy(cfg)
+    cfg_sdf_low.train.obstacle_lambda = 0.1
+    map_sdf_low, gas_sdf_low, time_sdf_low = run_test("SDF Repulsion (Weight 0.1)", cfg_sdf_low, sim_data)
+    results['SDF_Low'] = {'map': map_sdf_low, 'gas_in_obs': gas_sdf_low, 'time': time_sdf_low}
     
-    # --- TEST 3: Sampled Penalty (Evaluate 20 points per iteration) ---
-    cfg_sampled = copy.deepcopy(cfg)
-    cfg_sampled.train.obstacle_lambda = 0.5
-    cfg_sampled.train.obstacle_sample_size = 20
-    map_sampled, gas_sampled, time_sampled = run_test("Sampled Penalty", cfg_sampled, sim_data)
-    results['Sampled Penalty'] = {'map': map_sampled, 'gas_in_obs': gas_sampled, 'time': time_sampled}
+    # --- TEST 3: SDF Repulsion (Lambda = 0.5) ---
+    cfg_sdf_high = copy.deepcopy(cfg)
+    cfg_sdf_high.train.obstacle_lambda = 0.5
+    map_sdf_high, gas_sdf_high, time_sdf_high = run_test("SDF Repulsion (Weight 0.5)", cfg_sdf_high, sim_data)
+    results['SDF_High'] = {'map': map_sdf_high, 'gas_in_obs': gas_sdf_high, 'time': time_sdf_high}
     
     # --- VISUALIZATION ---
     fig, axes = plt.subplots(1, 4, figsize=(20, 5))
@@ -189,7 +188,6 @@ def main():
         y0 = beams_np[i, 0, 1] / cell_size
         x1 = beams_np[i, 1, 0] / cell_size
         y1 = beams_np[i, 1, 1] / cell_size
-        # Draw white, semi-transparent lines to avoid completely hiding the gas
         axes[0].plot([x0, x1], [y0, y1], color='white', alpha=0.3, linewidth=0.8)
         
     axes[0].set_title("Ground Truth, Obstacle & Beams")
@@ -199,17 +197,22 @@ def main():
     axes[1].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
     axes[1].set_title(f"Baseline\nTime: {results['Baseline']['time']:.1f}s | Obs Gas: {results['Baseline']['gas_in_obs']:.1f}")
     
-    # Full Penalty
-    axes[2].imshow(results['Full Penalty']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
+    # SDF Repulsion (Low Weight)
+    axes[2].imshow(results['SDF_Low']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
     axes[2].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    axes[2].set_title(f"Full Penalty\nTime: {results['Full Penalty']['time']:.1f}s | Obs Gas: {results['Full Penalty']['gas_in_obs']:.1f}")
+    axes[2].set_title(f"SDF Repulsion (λ=0.1)\nTime: {results['SDF_Low']['time']:.1f}s | Obs Gas: {results['SDF_Low']['gas_in_obs']:.1f}")
     
-    # Sampled Penalty
-    axes[3].imshow(results['Sampled Penalty']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
+    # SDF Repulsion (High Weight)
+    axes[3].imshow(results['SDF_High']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
     axes[3].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    axes[3].set_title(f"Sampled\nTime: {results['Sampled Penalty']['time']:.1f}s | Obs Gas: {results['Sampled Penalty']['gas_in_obs']:.1f}")
+    axes[3].set_title(f"SDF Repulsion (λ=0.5)\nTime: {results['SDF_High']['time']:.1f}s | Obs Gas: {results['SDF_High']['gas_in_obs']:.1f}")
     
+    # Set the limits of the axes to prevent the plot from expanding past the image boundaries
+    grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
+    grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
     for ax in axes:
+        ax.set_xlim(-0.5, grid_w - 0.5)
+        ax.set_ylim(-0.5, grid_h - 0.5)
         ax.axis('off')
         
     plt.tight_layout()
