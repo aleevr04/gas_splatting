@@ -12,20 +12,29 @@ from utils.sim_utils import (
     cell2xy
 )
 
-def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float], min_gaussians: int, coarse_cell_size: float):
+def lsqr_initialization(batch: MeasurementBatch, cfg: Config):
     """
     Runs a fast algebraic reconstruction (Least Squares) to get an initial estimate of the map and gaussians parameters.
     """
     
+    # Extract parameters from config
+    map_size = cfg.sim.map_size
+    min_gaussians = cfg.init.min_gaussians
+    
+    max_dim = max(map_size[0], map_size[1])
+    coarse_cell_size = cfg.init.coarse_proportion * max_dim
+    
+    # Extract data from batch
+    beams = batch.beams.tolist()
+    if isinstance(batch.measurements, torch.Tensor):
+        b = batch.measurements.cpu().numpy()
+    else:
+        b = np.array(batch.measurements)
+        
     # Build system matrix
     coarse_w = math.ceil(map_size[0] / coarse_cell_size)
     coarse_h = math.ceil(map_size[1] / coarse_cell_size)
     A_sparse = create_system_matrix_sparse((coarse_h, coarse_w), beams, coarse_cell_size)
-    
-    if isinstance(measurements, torch.Tensor):
-        b = measurements.cpu().numpy()
-    else:
-        b = np.array(measurements)
         
     # Solve Ax = b (Least Squares)
     result = lsqr(A_sparse, b, damp=0.1, iter_lim=50)
@@ -92,6 +101,7 @@ def lsqr_initialization(beams: list, measurements, map_size: tuple[float, float]
             torch.tensor(std, dtype=torch.float32), 
             img_coarse)
 
+
 def setup_gs_model(batch: MeasurementBatch, cfg: Config):
     """
     Initializes Gas Splatting model using simulation data.
@@ -107,16 +117,7 @@ def setup_gs_model(batch: MeasurementBatch, cfg: Config):
             - img_coarse: Visual result of the coarse initialization phase.
     """
 
-    max_dim = max(cfg.sim.map_size[0], cfg.sim.map_size[1])
-    coarse_cell_size = cfg.init.coarse_proportion * max_dim
-
-    init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(
-        batch.beams.tolist(), 
-        batch.measurements, 
-        cfg.sim.map_size, 
-        min_gaussians=cfg.init.min_gaussians,
-        coarse_cell_size=coarse_cell_size
-    )
+    init_pos, init_concentration, init_std, img_coarse = lsqr_initialization(batch, cfg)
     initial_gaussians = init_pos.shape[0]
 
     if initial_gaussians > 0:

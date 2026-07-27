@@ -138,10 +138,6 @@ class Trainer:
 
     def update_buffers(self, batch_data: MeasurementBatch):
         """Merges new incoming data into the training buffers, applying weight decay to older data."""
-
-        if self.buffer_weights.numel() > 0:
-            self.buffer_weights *= 0.95  # Decay older measurements
-
         # New measurements have maximum importance
         new_weights = torch.ones_like(batch_data.measurements)
 
@@ -221,6 +217,38 @@ class Trainer:
         
         return total_loss.item()
 
+    def inject_gaussians(self) -> int:
+        """Injects new Gaussians into the model based on high-error beams in the current buffer."""
+        y_pred = self.model(self.buffer_beams)
+        residuals = self.buffer_measurements - y_pred
+
+        # Beams with high relative error (greater than 50% of their measurement)
+        relative_mask = residuals > (0.5 * self.buffer_measurements)
+        # Top 20% most important beams based on their measurement values
+        importance_threshold = torch.quantile(self.buffer_measurements, 0.8)
+        importance_mask = self.buffer_measurements > importance_threshold
+
+        # Identify beams that are both high error and important
+        high_error_mask = relative_mask & importance_mask
+        high_error_beams = self.buffer_beams[high_error_mask]
+        
+        if high_error_beams.shape[0] > 0:
+            # Sample a random point along each high-error beam segment
+            p0 = high_error_beams[:, 0, :]
+            p1 = high_error_beams[:, 1, :]
+            u = torch.rand((high_error_beams.shape[0], 1), device=self.cfg.device)
+            sampled_pos = p0 + u * (p1 - p0)
+            
+            # Inyect new Gaussians at these sampled positions
+            init_scale = self.cfg.sim.cell_size * 2.0
+            self.model.inject_gaussians(
+                optimizer=self.optimizer, 
+                pos=sampled_pos, 
+                scale=init_scale
+            )
+
+        return high_error_beams.shape[0]
+
     def train(self, batch_data: MeasurementBatch) -> BatchResults:
         self.update_buffers(batch_data)
 
@@ -266,14 +294,22 @@ class Trainer:
             is_densifying = self.is_densify_it(iteration)
             if is_densifying:
                 with torch.no_grad():
+                    injected = 0
+                    if self.cfg.train.use_injection:
+                        injected = self.inject_gaussians()
+                    
                     stats = self.model.densify_and_prune(self.optimizer)
+
+                    if injected > 0:
+                        stats['injected'] = injected
+
                 self.results.densify_history[self.global_iteration] = stats
             # -------------------------
 
             batch_time += (time.time() - t_start)
 
             if iteration % 100 == 0:
-                pbar.set_postfix({'loss': f'{current_loss:.5f}'})
+                pbar.set_postfix({'loss': f'{current_loss:.5f}', 'gaussians': self.model.num_gaussians})
             
             # --- Real time visualization ---
             if self.visualizer and (iteration % 20 == 0 or is_densifying):

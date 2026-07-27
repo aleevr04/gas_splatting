@@ -27,7 +27,7 @@ def main():
     t0 = time.time()
     model, init_pos, img_coarse = setup_gs_model(sim_data.batch, cfg)
     setup_time = time.time() - t0
-    print("Model initialized")
+    print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
 
     plot_initial_guess(sim_data.ground_truth, img_coarse, init_pos, cfg)
 

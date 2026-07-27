@@ -153,46 +153,36 @@ class GasSplattingModel(nn.Module):
 
         return compute_definite_integral(pos, covariance_inverse, concentration, beams)
     
-    def compute_concentration_at_points(self, points: torch.Tensor) -> torch.Tensor:
+    def inject_gaussians(self, optimizer: torch.optim.Optimizer, pos: torch.Tensor, scale: float, concentration: float = 0.1):
         """
-        Computes the total gas concentration at specific 2D points.
-        
-        Args:
-            points: Tensor of shape (N, 2) containing (x, y) coordinates.
-            
-        Returns:
-            Tensor of shape (N,) containing the total concentration at each point.
+        Injects new Gaussians into the model with specified parameters.
         """
-        if points.numel() == 0:
-            return torch.tensor([], device=points.device)
-            
-        # Ensure points are 2D
-        if points.dim() == 1:
-            points = points.unsqueeze(0)
-            
-        total_concentration = torch.zeros(points.shape[0], device=points.device)
-        
-        pos = self.get_pos()
-        cov_inv = self.get_covariance_inverse()
-        concentration = self.get_concentration()
-        
-        for k in range(self.num_gaussians):
-            mu = pos[k]                 # (2,)
-            sig_inv = cov_inv[k]        # (2, 2)
-            c = concentration[k]        # scalar
-            
-            # Distance from points to Gaussian center
-            d = points - mu             # (N, 2)
-            
-            # Compute Mahalanobis distance: d^T * Sigma^-1 * d
-            d_unsq = d.unsqueeze(1)     # (N, 1, 2)
-            sig_inv_exp = sig_inv.expand(points.shape[0], 2, 2)
-            
-            dist = torch.bmm(torch.matmul(d_unsq, sig_inv_exp), d_unsq.transpose(1, 2)).squeeze(-1).squeeze(-1)
-            
-            total_concentration += c * torch.exp(-0.5 * dist)
-            
-        return total_concentration
+        N = pos.shape[0]
+        if N == 0: return
+
+        # Initialize new parameters for the injected Gaussians
+        new_pos = inverse_sigmoid(pos, self.map_size)
+        new_scale = torch.log(torch.full((N, 2), scale, device=self._scale.device))
+        new_concentration = inverse_softplus(torch.full((N,), concentration, device=self._concentration.device))
+        new_rotation = torch.zeros(N, device=self._rotation.device)
+
+        tensors_dict = {
+            "pos": new_pos,
+            "concentration": new_concentration,
+            "scale": new_scale,
+            "rotation": new_rotation
+        }
+
+        optimizable_tensors = self._cat_tensors_to_optimizer(optimizer, tensors_dict)
+
+        self._pos = optimizable_tensors["pos"]
+        self._concentration = optimizable_tensors["concentration"]
+        self._scale = optimizable_tensors["scale"]
+        self._rotation = optimizable_tensors["rotation"]
+
+        self.num_gaussians = self._pos.shape[0]
+        self.pos_grad_accum = torch.cat([self.pos_grad_accum, torch.zeros((N, 1), device=self._pos.device)], dim=0)
+        self.denom = torch.cat([self.denom, torch.zeros((N, 1), device=self._pos.device)], dim=0)
     
     def render_map(self, cell_size: float) -> np.ndarray:
         """

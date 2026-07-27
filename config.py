@@ -32,7 +32,8 @@ class TrainParams:
     iterations: int = 1500 # Max number of iterations
 
     obstacle_lambda: float = 0.1 # Weight for the obstacle penalty term in the loss function
-    obstacle_sample_size: int = 20 # Number of obstacle points to sample per iteration. 0 means evaluate all obstacle points
+
+    use_injection: bool = field(default=False, action="store_true") # Whether to use the injection mechanism during training
 
     early_stopping_patience: int = 100      # How many iterations to wait for an improvement
     early_stopping_min_delta: float = 1e-3  # Minimum improvement required to reset the patience counter
