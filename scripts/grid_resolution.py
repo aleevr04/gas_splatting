@@ -4,6 +4,7 @@ import time
 import copy
 import torch
 import numpy as np
+from tqdm import tqdm
 from simple_parsing import ArgumentParser
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -33,8 +34,6 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
     cfg.sim.seed = seed
     warmup_worker(cfg, seed)
     
-    print(f"[Worker Process] -> Starting Seed: {seed}", flush=True)
-    
     # Local data structures to store the results exclusively for THIS seed
     local_rmse = {m: {r: 0.0 for r in resolutions} for m in methods}
     local_ssim = {m: {r: 0.0 for r in resolutions} for m in methods}
@@ -52,7 +51,7 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
         grid_size = (res, res)
 
         matrix_setup_start = time.time()
-        system_matrix = create_system_matrix_sparse(grid_size, sim_data.batch.beams.tolist(), cfg.sim.cell_size).tocsr()
+        system_matrix = create_system_matrix_sparse(grid_size, sim_data.batch.beams.tolist(), cfg.sim.cell_size, quiet=True).tocsr()
         matrix_setup_time = time.time() - matrix_setup_start
             
         for method_name in methods:
@@ -70,8 +69,6 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
             local_time[method_name][res] = total_time
             local_rmse[method_name][res] = rmse
             local_ssim[method_name][res] = ssim_val
-
-    print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
 
     # Prevent GPU OOM errors in long multi-seed pools
     if torch.cuda.is_available():
@@ -100,10 +97,10 @@ def main():
     seeds = np.random.randint(0, 100000, size=cfg.num_seeds).tolist()
     methods = list(AVAILABLE_METHODS.keys())
 
-    # Deactivate tomo methods progress bar and live evaluations
-    tm.tqdm = lambda x, **kwargs: x
+    # Deactivate training evaluation, live visualization and enable quiet mode
     cfg.train.do_eval = False
     cfg.train.live_vis = False
+    cfg.quiet = True
 
     results = {
         "rmse": {m: {r: [] for r in resolutions} for m in methods},
@@ -112,6 +109,8 @@ def main():
     }
 
     print(f"Starting experiment: {len(resolutions)} resolutions x {len(seeds)} seeds.")
+    
+    global_pbar = tqdm(total=len(seeds), desc="Experiment Progress (Seeds)", dynamic_ncols=True)
 
     # --- Shared execution loop ---
     for seed, local_res in yield_parallel_experiment(
@@ -123,6 +122,10 @@ def main():
         methods=methods
     ):
         merge_local_results(results, local_res)
+        global_pbar.update(1)
+        global_pbar.set_postfix({"Last completed": seed})
+        
+    global_pbar.close()
 
     # --- Save results ---
     save_experiment_results({
@@ -134,7 +137,6 @@ def main():
     }, results)
 
     # --- Plot results ---
-    print("\nGenerating plots...")
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'grid_resolution_experiment.png')
 
     plot_experiment_evolution(

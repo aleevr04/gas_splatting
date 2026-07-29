@@ -38,7 +38,7 @@ def main():
         test_cfg.train.do_eval = True
         test_cfg.train.eval_interval = 25
         
-        model, _, _ = setup_gs_model(sim_data.batch, test_cfg)
+        model, _ = setup_gs_model(sim_data.batch, test_cfg)
         trainer = Trainer(model, test_cfg, ground_truth=gt_img)
         
         trainer.train(sim_data.batch)
@@ -87,7 +87,7 @@ def main():
     os.makedirs(os.path.dirname(save_path_recon), exist_ok=True)
     fig1.savefig(save_path_recon)
     plt.close(fig1)
-    print(f"Reconstruction plot saved in: {save_path_recon}")
+    print(f"[+] Reconstruction plot saved in: {save_path_recon}")
 
     # --- FIGURE 2: Loss & RMSE ---
     fig2, (ax_loss, ax_rmse) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
@@ -135,7 +135,7 @@ def main():
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'densification_curves.png')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
-    print(f"Training evolution plot saved in: {save_path}")
+    print(f"[+] Training evolution plot saved in: {save_path}")
 
 if __name__ == "__main__":
     main()

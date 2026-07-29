@@ -10,7 +10,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import Config
 from trainer import Trainer
 from gs_model import GasSplattingModel
-from utils.init_utils import setup_gs_model
+from utils.init_utils import InitializationData, setup_gs_model
 from utils.sim_utils import SimulationData, MeasurementBatch
 from utils.data_utils import build_custom_real_scenario
 from utils.plot_utils import plot_initial_guess, set_publication_style
@@ -66,7 +66,7 @@ def plot_real_results(model: GasSplattingModel, batch_data: MeasurementBatch, re
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     fig.savefig(save_path)
-    print(f"\n[+] Real data results plot saved in: {save_path}")
+    print(f"[+] Real data results plot saved in: {save_path}")
     plt.close(fig)
 
 def main():
@@ -80,7 +80,7 @@ def main():
 
     set_publication_style()
 
-    print(f"Using device: {cfg.device}")
+    if not cfg.quiet: print(f"Using device: {cfg.device}")
     
     # Load data
     data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json') 
@@ -102,21 +102,24 @@ def main():
     # ----- MODEL INITIALIZATION AND TRAINING ------
     if args.force_init:
         # Forced Initialization
-        init_pos = np.array([[5.0, 7.0], [9.0, 4.0]])
+        pos_tensor = torch.tensor([[5.0, 7.0], [9.0, 4.0]], dtype=torch.float32)
+        init_data = InitializationData(
+            pos=pos_tensor,
+            concentration=torch.full((2,), 10.0, dtype=torch.float32),
+            std=torch.full((2,), 1.0, dtype=torch.float32)
+        )
         model = GasSplattingModel(initial_gaussians=2, cfg=cfg)
         model.initialize_gaussians(
-            pos=torch.tensor(init_pos, device=cfg.device),
-            concentration=torch.tensor(10.0),
-            std=torch.tensor(1.0)
+            pos=init_data.pos.to(cfg.device),
+            concentration=init_data.concentration.to(cfg.device),
+            std=init_data.std.to(cfg.device)
         )
-        grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
-        grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-        plot_initial_guess(gt_img, np.zeros((grid_h, grid_w)), init_pos, cfg)
+        plot_initial_guess(gt_img, init_data, cfg)
     else:
-        # LQSR Initialization
-        model, init_pos, img_coarse = setup_gs_model(batch, cfg)
-        print(f"Model initialized with {model.num_gaussians} gaussians.")
-        plot_initial_guess(gt_img, img_coarse, init_pos, cfg)
+        # Automatic Initialization
+        model, init_data = setup_gs_model(batch, cfg)
+        if not cfg.quiet: print(f"Model initialized with {model.num_gaussians} Gaussians.")
+        plot_initial_guess(gt_img, init_data, cfg)
 
     # Training
     trainer = Trainer(model, cfg)

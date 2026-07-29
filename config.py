@@ -33,8 +33,6 @@ class TrainParams:
 
     obstacle_lambda: float = 0.1 # Weight for the obstacle penalty term in the loss function
 
-    use_injection: bool = field(default=False, action="store_true") # Whether to use the injection mechanism during training
-
     early_stopping_patience: int = 100      # How many iterations to wait for an improvement
     early_stopping_min_delta: float = 1e-3  # Minimum improvement required to reset the patience counter
     ema_alpha: float = 0.6                  # Smoothing factor (Lower = smoother, more memory of past loss)
@@ -60,6 +58,9 @@ class Config:
     sim: SimulationParams
     train: TrainParams
     densify: DensificationParams
+
+    # Global flag to silence console output
+    quiet: bool = field(default=False, action="store_true")
 
     # "cuda" if available, "cpu" otherwise. Can be overwritten
     device_type: str = "cuda" if torch.cuda.is_available() else "cpu"

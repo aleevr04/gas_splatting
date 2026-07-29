@@ -261,7 +261,7 @@ class Trainer:
         batch_time = 0.0
 
         current_loss = 0.0
-        pbar = tqdm(range(self.cfg.train.iterations), desc="Training", dynamic_ncols=True)        
+        pbar = tqdm(range(self.cfg.train.iterations), desc="Training", dynamic_ncols=True, disable=self.cfg.quiet)        
         for iteration in pbar:
             t_start = time.time()
             
@@ -286,7 +286,8 @@ class Trainer:
                 # Halt if patience runs out
                 if patience_counter >= self.cfg.train.early_stopping_patience:
                     batch_time += (time.time() - t_start) # Add iteration time before breaking
-                    tqdm.write(f"Early stopping triggered at iteration {iteration} (EMA Loss stalled at {ema_loss:.5f})")
+                    if not self.cfg.quiet:
+                        tqdm.write(f"Early stopping triggered at iteration {iteration} (EMA Loss stalled at {ema_loss:.5f})")
                     break 
             # ----------------------------
 
@@ -294,14 +295,9 @@ class Trainer:
             is_densifying = self.is_densify_it(iteration)
             if is_densifying:
                 with torch.no_grad():
-                    injected = 0
-                    if self.cfg.train.use_injection:
-                        injected = self.inject_gaussians()
-                    
+                    injected = self.inject_gaussians()
                     stats = self.model.densify_and_prune(self.optimizer)
-
-                    if injected > 0:
-                        stats['injected'] = injected
+                    stats['injected'] = injected
 
                 self.results.densify_history[self.global_iteration] = stats
             # -------------------------

@@ -19,7 +19,7 @@ def run_sart(batch: MeasurementBatch, cfg: Config, system_matrix: csr_matrix, ma
     grid_size, measurements = get_tomo_inputs(batch, cfg)
 
     t0 = time.time()
-    res = tm.sart(system_matrix, measurements, grid_size=grid_size, num_iterations=400, relaxation_factor=1.6)
+    res = tm.sart(system_matrix, measurements, grid_size=grid_size, num_iterations=400, relaxation_factor=1.6, quiet=cfg.quiet)
     recon_time = time.time() - t0
     return res, matrix_setup_time + recon_time
 
@@ -27,7 +27,7 @@ def run_rbf_sart(batch: MeasurementBatch, cfg: Config, system_matrix: csr_matrix
     grid_size, measurements = get_tomo_inputs(batch, cfg)
 
     t0 = time.time()
-    res = tm.rbf_sart(system_matrix, measurements, grid_size=grid_size, cell_size_m=cfg.sim.cell_size)
+    res = tm.rbf_sart(system_matrix, measurements, grid_size=grid_size, cell_size_m=cfg.sim.cell_size, quiet=cfg.quiet)
     recon_time = time.time() - t0
     return res, matrix_setup_time + recon_time
 
@@ -49,7 +49,7 @@ def run_ltd(batch: MeasurementBatch, cfg: Config, system_matrix: csr_matrix, mat
 
 def run_gas_splatting(batch: MeasurementBatch, cfg: Config, ground_truth: np.ndarray | None = None, **kwargs):
     t_start = time.time()
-    model, _, _ = setup_gs_model(batch, cfg)
+    model, _ = setup_gs_model(batch, cfg)
     gs_setup_time = time.time() - t_start
 
     trainer = Trainer(model, cfg, ground_truth)

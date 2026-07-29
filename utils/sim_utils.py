@@ -212,14 +212,14 @@ def generate_horizontal_vertical_beams(map_size_m: tuple, num_beams: int):
 #     BEAM GAS INTEGRAL / SYSTEM MATRIX
 # ==========================================
 
-def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_dimensions_meters: float) -> list[float]:
+def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_dimensions_meters: float, quiet: bool = False) -> list[float]:
     """Simulates a TDLAS raytracing measurement with path length calculation within cells."""
     integral_concentrations = []
     rows, cols = gas_concentration_map.shape
     map_width = cols * cell_dimensions_meters
     map_height = rows * cell_dimensions_meters
 
-    for (x0, y0), (x1, y1) in tqdm(beams, desc="Gas Integrals Simulation"):
+    for (x0, y0), (x1, y1) in tqdm(beams, desc="Gas Integrals Simulation", dynamic_ncols=True, disable=quiet):
         if not (0 <= x0 <= map_width and 0 <= y0 <= map_height and
                 0 <= x1 <= map_width and 0 <= y1 <= map_height):
             print(f"Warning: Beam ({x0}, {y0}) - ({x1}, {y1}) is out of map boundaries. Skipping.")
@@ -253,14 +253,14 @@ def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_
 
     return integral_concentrations
 
-def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_meters: float) -> dok_matrix:
+def create_system_matrix_sparse(grid_size: tuple, beams: list, cell_dimensions_meters: float, quiet: bool = False) -> dok_matrix:
     """Creates the sparse system matrix A for TDLAS tomography."""
     rows, cols = grid_size
     num_cells = rows * cols
     num_beams = len(beams)
     A = dok_matrix((num_beams, num_cells), dtype=float)
 
-    for i, ((x0, y0), (x1, y1)) in tqdm(enumerate(beams), desc="Building System Matrix", total=num_beams):
+    for i, ((x0, y0), (x1, y1)) in tqdm(enumerate(beams), desc="Building System Matrix", total=num_beams, dynamic_ncols=True, disable=quiet):
         beam_line = LineString([(x0, y0), (x1, y1)])
 
         min_c = max(0, int(np.floor(min(x0, x1) / cell_dimensions_meters)))
@@ -305,11 +305,13 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     if cfg.sim.seed:
         np.random.seed(cfg.sim.seed)
 
+    quiet = cfg.quiet
+
     # ----- Ground Truth -----
     if cfg.sim.gt_file is not None:
         if not os.path.exists(cfg.sim.gt_file):
             raise FileNotFoundError(f"Ground truth file not found: {cfg.sim.gt_file}")
-        print(f"Loading ground truth from {cfg.sim.gt_file}...")
+        if not quiet: print(f"Loading ground truth from {cfg.sim.gt_file}...")
         img_gt = np.loadtxt(cfg.sim.gt_file, delimiter=',')
        
         rows, cols = img_gt.shape
@@ -317,7 +319,7 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
         map_h = rows * cfg.sim.cell_size
         cfg.sim.map_size = (map_w, map_h)
     else:
-        print("Generating procedural ground truth...")
+        if not quiet: print("Generating procedural ground truth...")
         map_w, map_h = cfg.sim.map_size
         grid_w = int(map_w / cfg.sim.cell_size)
         grid_h = int(map_h / cfg.sim.cell_size)
@@ -325,7 +327,7 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
         img_gt = generate_fractal_gas_distribution(grid_size=(grid_h, grid_w))
 
     # ------ Beams ------
-    print("Generating beams...")
+    if not quiet: print("Generating beams...")
     beams_list = []
 
     num_random_beams = cfg.sim.num_beams // 2
@@ -335,14 +337,13 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
 
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
-    print(f"Total beams: {len(beams_list)}")
 
     # ------- Measurements --------
-    measurements_list = simulate_gas_integrals(img_gt, beams_list, cfg.sim.cell_size)
+    measurements_list = simulate_gas_integrals(img_gt, beams_list, cfg.sim.cell_size, quiet=quiet)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
 
     if cfg.sim.noise:
-        print(f"Adding noise to the measurements ({cfg.sim.snr_db} dB)...")
+        if not quiet: print(f"Adding noise to the measurements ({cfg.sim.snr_db} dB)...")
         num_beams = len(beams_list)
         if num_beams > 0:
             measurements = add_measurement_noise(y_true[:num_beams], snr_db=cfg.sim.snr_db)

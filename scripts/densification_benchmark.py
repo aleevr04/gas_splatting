@@ -4,6 +4,7 @@ import copy
 import time
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from matplotlib.patches import Patch
 from simple_parsing import ArgumentParser
 
@@ -34,8 +35,6 @@ def evaluate_single_seed(seed, base_cfg, methods):
     cfg.sim.seed = seed
     warmup_worker(cfg, seed)
     
-    print(f"[Worker Process] -> Starting Seed: {seed}", flush=True)
-    
     # Real data generation for this seed
     sim_data = generate_simulation_data(cfg)
     gt_img = sim_data.ground_truth
@@ -52,7 +51,7 @@ def evaluate_single_seed(seed, base_cfg, methods):
         
         # Setup model
         t_start = time.time()
-        model, _, _ = setup_gs_model(sim_data.batch, cfg)
+        model, _ = setup_gs_model(sim_data.batch, cfg)
         setup_time = time.time() - t_start
         
         # Train
@@ -70,7 +69,6 @@ def evaluate_single_seed(seed, base_cfg, methods):
         local_results["gaussians"][method] = model.num_gaussians
         local_results["time"][method] = setup_time + results.training_time
 
-    print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
     return seed, local_results
 
 def plot_densification_comparison(methods, results, save_path):
@@ -136,7 +134,6 @@ def plot_densification_comparison(methods, results, save_path):
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    print(f"\n[+] Comparison plot saved in: {save_path}")
     plt.close(fig)
 
 def main():
@@ -153,6 +150,11 @@ def main():
     
     methods = ["Original Densification", "Proposed Strategy"]
     
+    # Deactivate training evaluation, live visualization and enable quiet mode
+    cfg.train.do_eval = False
+    cfg.train.live_vis = False
+    cfg.quiet = True
+
     # Global structures
     results = {
         "rmse": {m: [] for m in methods},
@@ -163,6 +165,8 @@ def main():
     
     print(f"Starting experiment: comparing densification methods across {len(seeds)} seeds.")
     
+    global_pbar = tqdm(total=len(seeds), desc="Experiment Progress (Seeds)", dynamic_ncols=True)
+
     # --- Shared execution loop ---
     for seed, local_results in yield_parallel_experiment(
         worker_func=evaluate_single_seed,
@@ -172,6 +176,10 @@ def main():
         methods=methods
     ):
         merge_local_results(results, local_results)
+        global_pbar.update(1)
+        global_pbar.set_postfix({"Last completed": seed})
+        
+    global_pbar.close()
 
     # --- Print Summary ---
     print("\n--- Final Results (Averaged across seeds) ---")
@@ -199,6 +207,7 @@ def main():
     # --- Generate Plots ---
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'densification_comparison.png')
     plot_densification_comparison(methods, results, save_path)
+    print(f"[+] Comparison plot saved in: {save_path}")
 
 if __name__ == "__main__":
     main()

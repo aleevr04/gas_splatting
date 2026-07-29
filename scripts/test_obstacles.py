@@ -97,9 +97,8 @@ def run_test(test_name: str, cfg: Config, sim_data: SimulationData):
     print(f"\n--- Running Test: {test_name} ---")
     
     # --- Initialization ---
-    print(f"Running Least Squares initialization...")
     t0 = time.time()
-    model, init_pos, img_coarse = setup_gs_model(sim_data.batch, cfg)
+    model, _ = setup_gs_model(sim_data.batch, cfg)
     setup_time = time.time() - t0
     print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
     

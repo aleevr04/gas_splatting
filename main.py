@@ -14,31 +14,31 @@ def main():
     parser.add_arguments(Config, dest="cfg")
     args = parser.parse_args()
     cfg: Config = args.cfg
+    quiet = cfg.quiet
 
     set_publication_style()
 
-    print(f"Using device: {cfg.device}")
+    if not quiet: print(f"Using device: {cfg.device}")
 
     # --- Simulation ---
     sim_data = generate_simulation_data(cfg)
 
     # --- Initialization ---
-    print(f"Running Least Squares initialization...")
     t0 = time.time()
-    model, init_pos, img_coarse = setup_gs_model(sim_data.batch, cfg)
+    model, init_data = setup_gs_model(sim_data.batch, cfg)
     setup_time = time.time() - t0
-    print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
+    if not quiet: print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
 
-    plot_initial_guess(sim_data.ground_truth, img_coarse, init_pos, cfg)
+    plot_initial_guess(sim_data.ground_truth, init_data, cfg)
 
     # --- Training ---
     trainer = Trainer(model, cfg, ground_truth=sim_data.ground_truth)
 
-    print("Starting Gas Splatting training...")
+    if not quiet: print("Starting Gas Splatting training...")
     trainer.train(sim_data.batch)
     results = trainer.finish()
-    print(f"Loss: {results.loss_history[-1]:.6f}")
-    print(f"Setup Time: {setup_time:.3f} | Training Time: {results.training_time:.3f}")
+    if not quiet: print(f"Loss: {results.loss_history[-1]:.6f}")
+    if not quiet: print(f"Setup Time: {setup_time:.3f} | Training Time: {results.training_time:.3f}")
 
     # --- Plot Results ---
     plot_training_results(model, sim_data, results, cfg)

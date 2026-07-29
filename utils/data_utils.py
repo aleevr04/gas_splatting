@@ -130,7 +130,7 @@ def build_custom_real_scenario(
         gas_map = gaussian_filter(gas_map, sigma=1.0)
         
         # Recompute measurements
-        measurements = simulate_gas_integrals(gas_map, batch.beams.tolist(), cfg.sim.cell_size)
+        measurements = simulate_gas_integrals(gas_map, batch.beams.tolist(), cfg.sim.cell_size, quiet=cfg.quiet)
         batch.measurements = torch.tensor(measurements, dtype=torch.float32, device=cfg.device)
         
         return SimulationData(

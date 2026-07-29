@@ -6,7 +6,9 @@ from tqdm import tqdm
 #===============================
 # SART - SIMULTANEOUS ALGEBRAIC RECONSTRUCTION TECHNIQUE
 #===============================
-def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: tuple , num_iterations: int = 50, initial_guess=None, relaxation_factor: float = 1.0):
+def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, 
+         grid_size: tuple , num_iterations: int = 50, initial_guess=None, 
+         relaxation_factor: float = 1.0, quiet: bool = False):
     """
     Simultaneous Algebraic Reconstruction Technique (SART).
     
@@ -50,7 +52,7 @@ def sart(system_matrix: sparse.csr_matrix, measurements: np.ndarray, grid_size: 
     col_sums[col_sums == 0] = eps
 
     # Iterative reconstruction loop
-    for _ in tqdm(range(num_iterations), desc="SART"):
+    for _ in tqdm(range(num_iterations), desc="SART", disable=quiet):
         predicted_projection = system_matrix.dot(reconstruction)
         
         error = measurements - predicted_projection
@@ -136,7 +138,8 @@ def rbf_sart(system_matrix: sparse.csr_matrix,
              beta: float = 1.5,
              epsilon_base: float = 2.0,
              num_iterations: int = 50, 
-             relaxation_factor: float = 1.0):
+             relaxation_factor: float = 1.0,
+             quiet: bool = False):
     """
     RBF-SART Tomography (Gao et al. 2023).
     Dynamically scaled to be independent of the grid resolution.
@@ -185,7 +188,7 @@ def rbf_sart(system_matrix: sparse.csr_matrix,
     # Solve new system using SART
     alpha = np.zeros(num_centers, dtype=np.float32)
     
-    for _ in tqdm(range(num_iterations), desc="RBF-SART Iterations"):
+    for _ in tqdm(range(num_iterations), desc="RBF-SART Iterations", disable=quiet):
         predicted = W.dot(alpha)
         error = measurements - predicted
         

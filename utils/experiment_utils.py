@@ -55,7 +55,6 @@ def calculate_metrics(gt_img, res_img):
 
 def warmup_worker(cfg, seed):
     """Executes a tiny run to wake up JIT/PyTorch and prevent cold start penalties."""
-    print(f"[Worker Process] -> Warming up Seed: {seed}...", flush=True)
     warmup_cfg = copy.deepcopy(cfg)
     warmup_res = 20
     warmup_cfg.sim.cell_size = warmup_cfg.sim.map_size[0] / warmup_res
@@ -65,7 +64,8 @@ def warmup_worker(cfg, seed):
     _ = create_system_matrix_sparse(
         (warmup_res, warmup_res), 
         warmup_sim.batch.beams.tolist(), 
-        warmup_cfg.sim.cell_size
+        warmup_cfg.sim.cell_size,
+        quiet=True
     ).tocsr()
 
     run_gas_splatting(batch=warmup_sim.batch, cfg=warmup_cfg, ground_truth=warmup_sim.ground_truth)

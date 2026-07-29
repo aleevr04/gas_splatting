@@ -7,6 +7,7 @@ from config import Config
 from gs_model import GasSplattingModel
 from trainer import TrainingResults
 from utils.sim_utils import SimulationData
+from utils.init_utils import InitializationData
 
 def set_publication_style():
     """Configures Matplotlib global style"""
@@ -29,52 +30,45 @@ def set_publication_style():
         'savefig.pad_inches': 0.05
     })
 
-def plot_initial_guess(img_gt, img_coarse, init_pos, cfg: Config):
-    """Shows ground truth (if available) and initial reconstruction image, and saves it."""
+def plot_initial_guess(img_gt: np.ndarray | None, init_data: InitializationData, cfg: Config):
+    """Shows ground truth (if available) and initial reconstruction seeds, and saves it."""
 
     map_w, map_h = cfg.sim.map_size
 
-    # Check if ground truth exists
-    has_gt = img_gt is not None
+    init_pos = init_data.pos.detach().cpu().numpy()
+    
+    # Create a blank dark background to frame the seeds nicely
+    grid_w, grid_h = int(map_w / cfg.sim.cell_size), int(map_h / cfg.sim.cell_size)
+    background = np.zeros((grid_h, grid_w))
 
-    # Determine dynamic color mapping
-    vmin = 0
-    if has_gt:
-        vmax = max(img_gt.max(), img_coarse.max())
-    else:
-        vmax = img_coarse.max()
-        
-    # Prevent matplotlib warnings if vmax is exactly 0 (e.g., during forced init with empty map)
-    vmax = vmax if vmax > 0 else 1.0 
-
-    if has_gt:
+    if img_gt is not None:
         # Create a 2-panel side-by-side plot
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        vmax = max(img_gt.max(), 1e-3) # Prevent vmax=0 warnings
 
         ax1.set_title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
-        im = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+        im = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=0, vmax=vmax)
+        fig.colorbar(im, ax=ax1, label="ppm", fraction=0.046, pad=0.04)
 
-        ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
-        ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
-        ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Peaks')
+        ax2.set_title("Initialization")
+        ax2.imshow(background, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=0, vmax=1)
+        ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Positions')
         ax2.legend()
 
-        fig.colorbar(im, ax=[ax1, ax2], label="ppm", fraction=0.025, pad=0.05)
     else:
         # Create a single-panel plot just for the initialization
         fig, ax2 = plt.subplots(1, 1, figsize=(7, 5))
         
-        ax2.set_title(f"Algebraic Initialization ({img_coarse.shape[0]}x{img_coarse.shape[1]})")
-        im = ax2.imshow(img_coarse, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
-        ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Peaks')
+        ax2.set_title("Initialization")
+        ax2.imshow(background, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=0, vmax=1)
+        ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Positions')
         ax2.legend()
         
-        fig.colorbar(im, ax=ax2, label="ppm", fraction=0.046, pad=0.04)
-
     # Save plot instead of showing it
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'initial_guess.png')
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
+    
     print(f"[+] Initial guess plot saved in: {save_path}")
     
     plt.close(fig) # Free memory
@@ -269,6 +263,6 @@ def plot_experiment_evolution(x_values, x_label, methods_info, results_rmse, res
     # Save plot
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)
-    print(f"\n[+] Experiment plot saved in: {save_path}")
+    print(f"[+] Experiment plot saved in: {save_path}")
     
     plt.close(fig) # Free memory

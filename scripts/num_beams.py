@@ -4,6 +4,7 @@ import time
 import copy
 import torch
 import numpy as np
+from tqdm import tqdm
 from simple_parsing import ArgumentParser
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -32,8 +33,6 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
     cfg = copy.deepcopy(base_cfg)
     cfg.sim.seed = seed
     warmup_worker(cfg, seed)
-
-    print(f"[Worker Process] -> Starting Seed: {seed}", flush=True)
     
     local_rmse = {m: {b: 0.0 for b in num_beams_list} for m in methods}
     local_ssim = {m: {b: 0.0 for b in num_beams_list} for m in methods}
@@ -55,7 +54,7 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
         grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
 
         matrix_setup_start = time.time()
-        system_matrix = create_system_matrix_sparse((grid_w, grid_h), batch.beams.tolist(), cfg.sim.cell_size).tocsr()
+        system_matrix = create_system_matrix_sparse((grid_w, grid_h), batch.beams.tolist(), cfg.sim.cell_size, quiet=True).tocsr()
         matrix_setup_time = time.time() - matrix_setup_start
         
         for method_name in methods:
@@ -73,8 +72,6 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
             local_time[method_name][n_beams] = total_time
             local_rmse[method_name][n_beams] = rmse
             local_ssim[method_name][n_beams] = ssim_val
-
-    print(f"[Worker Process] -> Completed Seed: {seed}", flush=True)
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -102,10 +99,10 @@ def main():
     seeds = np.random.randint(0, 100000, size=cfg.num_seeds).tolist()
     methods = list(AVAILABLE_METHODS.keys())
 
-    # Deactivate tomo methods progress bar and live evaluations
-    tm.tqdm = lambda x, **kwargs: x
+    # Deactivate training evaluation and live visualization for this experiment
     cfg.train.do_eval = False
     cfg.train.live_vis = False
+    cfg.quiet = True
 
     print(f"Starting experiment: {len(num_beams_list)} beam configurations x {len(seeds)} seeds.")
 
@@ -114,6 +111,8 @@ def main():
         "ssim": {m: {b: [] for b in num_beams_list} for m in methods},
         "time": {m: {b: [] for b in num_beams_list} for m in methods}
     }
+
+    global_pbar = tqdm(total=len(seeds), desc="Experiment Progress (Seeds)", dynamic_ncols=True)
 
     # --- Shared execution loop ---
     for seed, local_results in yield_parallel_experiment(
@@ -125,6 +124,10 @@ def main():
         methods=methods
     ):
         merge_local_results(results, local_results)
+        global_pbar.update(1)
+        global_pbar.set_postfix({"Last completed": seed})
+        
+    global_pbar.close()
 
     # --- Save results ---
     save_experiment_results({
@@ -136,7 +139,6 @@ def main():
     }, results)
 
     # --- Plot results ---
-    print("\nGenerating plots...")
     save_path = os.path.join(os.path.dirname(__file__), '..', 'plots', 'num_beams_experiment.png')
 
     plot_experiment_evolution(

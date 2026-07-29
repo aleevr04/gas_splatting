@@ -69,6 +69,7 @@ class LiveVisualizer:
     def __init__(self, cfg: Config):
         self.map_size = cfg.sim.map_size
         self.cell_size = cfg.sim.cell_size
+        self.quiet = cfg.quiet
 
         # Asynchronous frame queue for GIF generation
         self.frame_queue = queue.Queue()
@@ -312,12 +313,12 @@ class LiveVisualizer:
             print("Could not generate GIF. No frames captured.")
             return
             
-        print("Waiting for frame capture to complete...")
+        if not self.quiet: print("Waiting for frame capture to complete...")
         # Send stop signal to the writer thread and wait for it to finish
         self.frame_queue.put(None)
         self.writer_thread.join()
 
-        print(f"Generating GIF from {self.frame_count} frames...")
+        if not self.quiet: print(f"Generating GIF from {self.frame_count} frames...")
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
         # Create GIF from saved frames using ffmpeg
