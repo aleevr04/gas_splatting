@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import MeasurementBatch
+from utils.sim_utils import MeasurementBatch, extract_candidate_positions
 
 @dataclass
 class InitializationData:
@@ -17,32 +17,32 @@ class InitializationData:
 
 def injection_initialization(batch: MeasurementBatch, cfg: Config):
     """
-    Initializes Gaussians by sampling random points along the beams with the highest measurements.
+    Initializes Gaussians based on high-concentration beams using Continuous Spatial NMS.
     """
-    measurements = batch.measurements
-    beams = batch.beams
+    # Dynamic scale
+    map_w, map_h = cfg.sim.map_size
+    init_std_val = min(map_w, map_h) * 0.1
     
-    # Select the top 20% most critical beams (ignoring empty environment noise)
-    threshold = torch.quantile(measurements, 0.8)
+    final_pos = extract_candidate_positions(
+        beams=batch.beams,
+        importance_scores=batch.measurements,
+        min_dist=init_std_val,
+        device=cfg.device
+    )
     
-    important_mask = measurements >= threshold
-    target_beams = beams[important_mask]
+    num_final = final_pos.shape[0]
     
-    if target_beams.shape[0] == 0:
-        target_beams = beams # Fallback
+    if num_final == 0:
+        return InitializationData(
+            pos=torch.empty((0, 2), device=cfg.device),
+            concentration=torch.empty((0,), device=cfg.device),
+            std=torch.empty((0,), device=cfg.device)
+        )
         
-    # Sample one random point along each important beam
-    p0 = target_beams[:, 0, :]
-    p1 = target_beams[:, 1, :]
-    u = torch.rand((target_beams.shape[0], 1), device=cfg.device)
-    pos = p0 + u * (p1 - p0)
+    std = torch.full((num_final,), init_std_val, dtype=torch.float32, device=cfg.device)
+    concentration = torch.full((num_final,), 0.1, dtype=torch.float32, device=cfg.device)
     
-    # Define robust initial parameters (seed-like)
-    init_std = cfg.sim.cell_size * 2.0
-    std = torch.full((pos.shape[0],), init_std, dtype=torch.float32, device=cfg.device)
-    concentration = torch.full((pos.shape[0],), 0.1, dtype=torch.float32, device=cfg.device)
-    
-    return InitializationData(pos=pos, concentration=concentration, std=std)
+    return InitializationData(pos=final_pos, concentration=concentration, std=std)
 
 def setup_gs_model(batch: MeasurementBatch, cfg: Config) -> tuple[GasSplattingModel, InitializationData]:
     """

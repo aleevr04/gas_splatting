@@ -164,10 +164,10 @@ def main():
     map_sdf_low, gas_sdf_low, time_sdf_low = run_test("SDF Repulsion (Weight 0.1)", cfg_sdf_low, sim_data)
     results['SDF_Low'] = {'map': map_sdf_low, 'gas_in_obs': gas_sdf_low, 'time': time_sdf_low}
     
-    # --- TEST 3: SDF Repulsion (Lambda = 0.5) ---
+    # --- TEST 3: SDF Repulsion (Lambda = 1.0) ---
     cfg_sdf_high = copy.deepcopy(cfg)
-    cfg_sdf_high.train.obstacle_lambda = 0.5
-    map_sdf_high, gas_sdf_high, time_sdf_high = run_test("SDF Repulsion (Weight 0.5)", cfg_sdf_high, sim_data)
+    cfg_sdf_high.train.obstacle_lambda = 1.0
+    map_sdf_high, gas_sdf_high, time_sdf_high = run_test("SDF Repulsion (Weight 1.0)", cfg_sdf_high, sim_data)
     results['SDF_High'] = {'map': map_sdf_high, 'gas_in_obs': gas_sdf_high, 'time': time_sdf_high}
     
     # --- VISUALIZATION ---
@@ -204,7 +204,7 @@ def main():
     # SDF Repulsion (High Weight)
     axes[3].imshow(results['SDF_High']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
     axes[3].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    axes[3].set_title(f"SDF Repulsion (λ=0.5)\nTime: {results['SDF_High']['time']:.1f}s | Obs Gas: {results['SDF_High']['gas_in_obs']:.1f}")
+    axes[3].set_title(f"SDF Repulsion (λ=1.0)\nTime: {results['SDF_High']['time']:.1f}s | Obs Gas: {results['SDF_High']['gas_in_obs']:.1f}")
     
     # Set the limits of the axes to prevent the plot from expanding past the image boundaries
     grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)

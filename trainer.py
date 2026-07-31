@@ -10,7 +10,7 @@ from typing import List, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import MeasurementBatch
+from utils.sim_utils import MeasurementBatch, extract_candidate_positions
 from utils.live_vis import LiveVisualizer
 
 
@@ -218,36 +218,31 @@ class Trainer:
         return total_loss.item()
 
     def inject_gaussians(self) -> int:
-        """Injects new Gaussians into the model based on high-error beams in the current buffer."""
+        """Injects new Gaussians based on high-error beams using Continuous Spatial NMS."""
         y_pred = self.model(self.buffer_beams)
         residuals = self.buffer_measurements - y_pred
-
-        # Beams with high relative error (greater than 50% of their measurement)
-        relative_mask = residuals > (0.5 * self.buffer_measurements)
-        # Top 20% most important beams based on their measurement values
-        importance_threshold = torch.quantile(self.buffer_measurements, 0.8)
-        importance_mask = self.buffer_measurements > importance_threshold
-
-        # Identify beams that are both high error and important
-        high_error_mask = relative_mask & importance_mask
-        high_error_beams = self.buffer_beams[high_error_mask]
         
-        if high_error_beams.shape[0] > 0:
-            # Sample a random point along each high-error beam segment
-            p0 = high_error_beams[:, 0, :]
-            p1 = high_error_beams[:, 1, :]
-            u = torch.rand((high_error_beams.shape[0], 1), device=self.cfg.device)
-            sampled_pos = p0 + u * (p1 - p0)
-            
-            # Inyect new Gaussians at these sampled positions
-            init_scale = self.cfg.sim.cell_size * 2.0
+        # Dynamic scale
+        map_w, map_h = self.model.map_size[0].item(), self.model.map_size[1].item()
+        init_scale = min(map_w, map_h) * 0.1
+        
+        final_pos = extract_candidate_positions(
+            beams=self.buffer_beams,
+            importance_scores=residuals,
+            min_dist=init_scale,
+            device=self.cfg.device
+        )
+        
+        num_injected = final_pos.shape[0]
+        
+        if num_injected > 0:
             self.model.inject_gaussians(
                 optimizer=self.optimizer, 
-                pos=sampled_pos, 
+                pos=final_pos, 
                 scale=init_scale
             )
-
-        return high_error_beams.shape[0]
+            
+        return num_injected
 
     def train(self, batch_data: MeasurementBatch) -> BatchResults:
         self.update_buffers(batch_data)
@@ -295,9 +290,8 @@ class Trainer:
             is_densifying = self.is_densify_it(iteration)
             if is_densifying:
                 with torch.no_grad():
-                    injected = self.inject_gaussians()
                     stats = self.model.densify_and_prune(self.optimizer)
-                    stats['injected'] = injected
+                    stats['injections'] = self.inject_gaussians()
 
                 self.results.densify_history[self.global_iteration] = stats
             # -------------------------

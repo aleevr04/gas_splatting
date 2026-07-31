@@ -153,7 +153,7 @@ class GasSplattingModel(nn.Module):
 
         return compute_definite_integral(pos, covariance_inverse, concentration, beams)
     
-    def inject_gaussians(self, optimizer: torch.optim.Optimizer, pos: torch.Tensor, scale: float, concentration: float = 0.1):
+    def inject_gaussians(self, optimizer: torch.optim.Optimizer, pos: torch.Tensor, scale: float, concentration: float = 0.01):
         """
         Injects new Gaussians into the model with specified parameters.
         """

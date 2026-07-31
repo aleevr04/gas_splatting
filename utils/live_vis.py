@@ -90,6 +90,7 @@ class LiveVisualizer:
         while True:
             item = self.frame_queue.get()
             if item is None:
+                self.frame_queue.task_done()
                 break
             
             frame_path, qimage = item
@@ -316,6 +317,7 @@ class LiveVisualizer:
         if not self.quiet: print("Waiting for frame capture to complete...")
         # Send stop signal to the writer thread and wait for it to finish
         self.frame_queue.put(None)
+        self.frame_queue.join()
         self.writer_thread.join()
 
         if not self.quiet: print(f"Generating GIF from {self.frame_count} frames...")
@@ -337,3 +339,6 @@ class LiveVisualizer:
             
         shutil.rmtree(self.temp_dir, ignore_errors=True)
         self.main_win.close()
+        self.main_win.deleteLater()
+        self.app.processEvents()
+        self.app.quit()

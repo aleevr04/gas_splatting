@@ -163,18 +163,39 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
 
     if results.densify_history:
         iters = list(results.densify_history.keys())
-        clones = [d['clones'] for d in results.densify_history.values()]
-        splits = [d['splits'] for d in results.densify_history.values()]
-        prunes = [d['prunes'] for d in results.densify_history.values()]
+        clones = [d.get('clones', 0) for d in results.densify_history.values()]
+        splits = [d.get('splits', 0) for d in results.densify_history.values()]
+        prunes = [d.get('prunes', 0) for d in results.densify_history.values()]
+        injections = [d.get('injections', 0) for d in results.densify_history.values()]
 
         bar_width = cfg.densify.densify_interval * 0.4 
-        ax5.bar(iters, clones, width=bar_width, label='Clones', color='skyblue')
-        ax5.bar(iters, splits, width=bar_width, bottom=clones, label='Splits', color='orange')
         
-        bottom_prunes = [c + s for c, s in zip(clones, splits)]
-        ax5.bar(iters, prunes, width=bar_width, bottom=bottom_prunes, label='Prunes', color='red')
+        # Track the bottom of the stack to build a proper stacked bar chart
+        bottom_stack = np.zeros(len(iters))
 
-        ax5.legend(loc='upper right')
+        # Dynamic plotting: Only plot and add to legend if the event actually occurred
+        has_events = False
+        if sum(clones) > 0:
+            ax5.bar(iters, clones, width=bar_width, bottom=bottom_stack, label='Clones', color='skyblue')
+            bottom_stack += np.array(clones)
+            has_events = True
+            
+        if sum(splits) > 0:
+            label = 'Splits' if cfg.densify.original_dens else 'Splits (Long-Axis)'
+            ax5.bar(iters, splits, width=bar_width, bottom=bottom_stack, label=label, color='orange')
+            bottom_stack += np.array(splits)
+            has_events = True
+            
+        if sum(injections) > 0:
+            ax5.bar(iters, injections, width=bar_width, bottom=bottom_stack, label='Injections', color='purple')
+            bottom_stack += np.array(injections)
+            has_events = True
+            
+        if sum(prunes) > 0:
+            ax5.bar(iters, prunes, width=bar_width, bottom=bottom_stack, label='Prunes', color='red')
+            has_events = True
+
+        if has_events: ax5.legend(loc='upper right')
         
     ax5.grid(True, axis='y', ls="--", alpha=0.3)
 

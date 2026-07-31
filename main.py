@@ -38,7 +38,7 @@ def main():
     trainer.train(sim_data.batch)
     results = trainer.finish()
     if not quiet: print(f"Loss: {results.loss_history[-1]:.6f}")
-    if not quiet: print(f"Setup Time: {setup_time:.3f} | Training Time: {results.training_time:.3f}")
+    if not quiet: print(f"Setup Time: {setup_time:.3f}s | Training Time: {results.training_time:.3f}s")
 
     # --- Plot Results ---
     plot_training_results(model, sim_data, results, cfg)

@@ -5,11 +5,6 @@ from dataclasses import dataclass
 from simple_parsing import field
 
 @dataclass
-class InitParams:
-    min_gaussians: int = 10 # Minimum number of Gaussians to use when no peaks are found in the initialization
-    coarse_proportion: float = 0.1 # Proportion of the map (longer side) to be used for coarse initialization
-
-@dataclass
 class SimulationParams:
     seed: Optional[int] = None # Random seed for GT generation
     gt_file: Optional[str] = None # csv file containing gas distribution data 
@@ -17,7 +12,7 @@ class SimulationParams:
     map_size: Tuple[float, float] = (20.0, 20.0) # Map size (map_width, map_height) in meters. Ignored when a csv file is provided
     cell_size: float = 1.0 # Cell size in meters
 
-    num_beams: int = 30 # Total number of TDLAS beams
+    num_beams: int = 50 # Total number of TDLAS beams
     
     noise: bool = field(default=False, action="store_true") # Add noise to simulated measurements
     snr_db: int = 30 # Signal-to-noise ratio (dB)
@@ -44,8 +39,8 @@ class TrainParams:
 
 @dataclass
 class DensificationParams:
-    gradient_threshold: float = 0.003 # Threshold for gradient-based densification
-    scale_threshold: float = 0.05 # Threshold used by orginal densification method. It decides whether the Gaussian should be splitted or cloned
+    gradient_threshold: float = 0.001 # Threshold for gradient-based densification
+    scale_threshold: float = 0.05 # Threshold used by original densification method. It decides whether the Gaussian should be splitted or cloned
     prune_threshold: float = 0.005 # Threshold for pruning Gaussians with low concentration
     densify_from: int = 100 # Densification will start at this iteration
     densify_until: int = 750 # Densification will stop at this iteration
@@ -54,7 +49,6 @@ class DensificationParams:
 
 @dataclass
 class Config:
-    init: InitParams
     sim: SimulationParams
     train: TrainParams
     densify: DensificationParams
