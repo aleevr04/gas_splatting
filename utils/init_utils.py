@@ -4,7 +4,8 @@ from typing import Any, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import MeasurementBatch, extract_candidate_positions
+from utils.sim_utils import MeasurementBatch
+from utils.densification_utils import extract_candidate_positions
 
 @dataclass
 class InitializationData:

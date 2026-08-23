@@ -9,11 +9,11 @@ from simple_parsing import ArgumentParser
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import utils.tomo_utils as tm
 from config import ExperimentConfig
-from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
+from utils.sim_utils import generate_simulation_data
+from methods.tomography import create_system_matrix_sparse
 from utils.plot_utils import plot_experiment_evolution
-from utils.methods_registry import AVAILABLE_METHODS
+from methods.registry import AVAILABLE_METHODS
 from utils.experiment_utils import (
     setup_worker_env, 
     warmup_worker, 

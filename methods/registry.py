@@ -1,7 +1,7 @@
 import time
 from scipy.sparse import csr_matrix
 
-import utils.tomo_utils as tm
+import methods.tomography as tm
 from utils.init_utils import setup_gs_model
 from utils.sim_utils import EnvironmentContext, MeasurementBatch
 from config import Config

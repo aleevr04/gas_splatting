@@ -7,8 +7,9 @@ import numpy as np
 from skimage.metrics import structural_similarity as ssim
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from utils.sim_utils import generate_simulation_data, create_system_matrix_sparse
-from utils.methods_registry import run_gas_splatting
+from utils.sim_utils import generate_simulation_data
+from methods.tomography import create_system_matrix_sparse
+from methods.registry import run_gas_splatting
 
 def save_experiment_results(metadata, results, folder="results"):
     """

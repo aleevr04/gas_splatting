@@ -14,11 +14,11 @@ from utils.sim_utils import (
     MeasurementBatch, 
     EnvironmentContext,
     generate_simulation_data, 
-    create_system_matrix_sparse
 )
+from methods.tomography import create_system_matrix_sparse
 from utils.data_utils import build_custom_real_scenario
 from utils.plot_utils import set_publication_style
-from utils.methods_registry import AVAILABLE_METHODS
+from methods.registry import AVAILABLE_METHODS
 
 def main():
     # --- Configuration ---

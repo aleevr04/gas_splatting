@@ -13,11 +13,12 @@ from utils.sim_utils import (
     EnvironmentContext,
     GroundTruth,
     MeasurementBatch,
-    xy2cell, 
+    
     simulate_gas_integrals, 
     generate_random_beams, 
     generate_radial_beams
 )
+from utils.geometry_utils import xy2cell
 
 def load_real_tdlas_data(filepath, cfg: Config) -> MeasurementBatch:
     """

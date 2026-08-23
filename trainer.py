@@ -10,8 +10,8 @@ from typing import List, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import EnvironmentContext, MeasurementBatch, extract_candidate_positions
-from utils.live_vis import LiveVisualizer
+from utils.sim_utils import EnvironmentContext, MeasurementBatch
+from utils.densification_utils import extract_candidate_positions
 
 
 @dataclass
@@ -42,7 +42,11 @@ class Trainer:
         self.model = model
         self.ground_truth = environment.ground_truth.gas_map if environment and environment.ground_truth else None
         self.cfg = cfg
-        self.visualizer = LiveVisualizer(cfg) if self.cfg.train.live_vis else None
+        if self.cfg.train.live_vis:
+            from visualization.live_visualizer import LiveVisualizer
+            self.visualizer = LiveVisualizer(cfg)
+        else:
+            self.visualizer = None
         if self.visualizer and self.ground_truth is not None:
             self.visualizer.set_ground_truth(self.ground_truth)
         self.results = TrainingResults()

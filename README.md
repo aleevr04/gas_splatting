@@ -38,9 +38,11 @@ To evaluate the effectiveness of **Gas Splatting**, it is compared against tradi
 
 ```bash
 gas_splatting/
+├── methods/            # Reconstruction method registry and runners
 ├── real_data/          # Real-world TDLAS sweep datasets (JSON)
 ├── scripts/            # Benchmarks, experiments, and plotting scripts
-├── utils/              # Math, plotting, sim, and core utilities
+├── utils/              # Simulation, geometry, initialization, and math utilities
+├── visualization/      # Visualization components and interactive tools
 ├── config.py           # simple_parsing configuration definitions
 ├── gs_model.py         # Gas Splatting model, densification logic 
 ├── main.py             # Main entry point (Sim -> Init -> Train)
@@ -94,7 +96,7 @@ To run the default simulation and training pipeline, simply execute the main scr
 python main.py
 ```
 
-This will generate simulation data (ground truth, beams geometry and measuremnts), initialize model parameters and start training.
+This will generate simulation data (ground truth, beam geometry, and measurements), initialize model parameters, and start training.
 
 ### Experimental & Benchmarking Scripts
 
@@ -106,8 +108,6 @@ The `scripts/` directory contains various executable files designed to test, val
 
 * `densification_training.py`: Compares both densification strategies using a single seed, rendering the resulting gas maps alongside their loss functions and RMSE evolution plots.
 
-* `long_axis_split.py`: Launches an interactive window featuring real-time sliders to visually inspect and tune the parameters of the proposed Gaussian splitting technique.
-
 * `split_c_factor.py`: Generates an error-evolution graph evaluating the impact of the splitting factor parameter (c) within our custom densification strategy.
 
 * `fractal_distribution.py`: A standalone script to generate gas distribution maps using the same fractal algorithm used in simulation ground truths. Great for experimenting with different map sizes, grid resolutions, and random seeds.
@@ -117,6 +117,14 @@ The `scripts/` directory contains various executable files designed to test, val
 * `num_beams.py`: Runs a scaling benchmark evaluating reconstruction accuracy as the number of available TDLAS measurement beams increases.
 
 * `test_real_data.py`: Validates the proposed Gas Splatting method against real-world TDLAS experimental data.
+
+### Visualization
+
+The `visualization/` directory contains components used to display training progress and standalone visualization tools:
+
+* `visualization/live_visualizer.py`: Reusable live training visualizer instantiated by the trainer.
+
+* `visualization/split_visualizer.py`: Standalone interactive tool for inspecting Gaussian splitting.
 
 </details>
 
@@ -134,7 +142,7 @@ python [script] --help
 
 ### Examples
 
-Run a custom simulation with 50 beams and a maximum of 2000 training iterations::
+Run a custom simulation with 50 beams and a maximum of 2000 training iterations:
 
 ```bash
 python main.py --num_beams 50 --iterations 2000
