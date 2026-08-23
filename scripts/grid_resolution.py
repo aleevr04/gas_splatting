@@ -41,26 +41,26 @@ def evaluate_single_seed(seed, base_cfg, resolutions, methods):
 
     for res in resolutions:
         # Update cell size based on resolution (assuming square map size)
-        cfg.sim.cell_size = cfg.sim.map_size[0] / res
+        cfg.env.cell_size = cfg.env.map_size[0] / res
         
         # In this experiment, since the grid resolution changes, the dimensions 
         # of the Ground Truth image also change. We MUST regenerate the simulation.
-        sim_data = generate_simulation_data(cfg)
-        gt_img = sim_data.ground_truth
+        batch, environment = generate_simulation_data(cfg)
+        gt_img = environment.ground_truth.gas_map
 
         grid_size = (res, res)
 
         matrix_setup_start = time.time()
-        system_matrix = create_system_matrix_sparse(grid_size, sim_data.batch.beams.tolist(), cfg.sim.cell_size, quiet=True).tocsr()
+        system_matrix = create_system_matrix_sparse(grid_size, batch.beams.tolist(), cfg.env.cell_size, quiet=True).tocsr()
         matrix_setup_time = time.time() - matrix_setup_start
             
         for method_name in methods:
             func = AVAILABLE_METHODS[method_name]["func"]
             
             res_img, total_time = func(
-                batch=sim_data.batch, 
+                batch=batch,
                 cfg=cfg,
-                ground_truth=gt_img,
+                environment=environment,
                 system_matrix=system_matrix, 
                 matrix_setup_time=matrix_setup_time
             )
@@ -132,7 +132,7 @@ def main():
         "experiment_name": "grid_resolution",
         "resolutions": resolutions,
         "seeds": seeds,
-        "map_size": cfg.sim.map_size,
+        "map_size": cfg.env.map_size,
         "num_beams": cfg.sim.num_beams
     }, results)
 

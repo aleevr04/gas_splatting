@@ -67,8 +67,8 @@ class CleanLogAxis(pg.AxisItem):
 
 class LiveVisualizer:
     def __init__(self, cfg: Config):
-        self.map_size = cfg.sim.map_size
-        self.cell_size = cfg.sim.cell_size
+        self.map_size = cfg.env.map_size
+        self.cell_size = cfg.env.cell_size
         self.quiet = cfg.quiet
 
         # Asynchronous frame queue for GIF generation

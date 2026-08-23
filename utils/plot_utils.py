@@ -6,7 +6,7 @@ import matplotlib.gridspec as gridspec
 from config import Config
 from gs_model import GasSplattingModel
 from trainer import TrainingResults
-from utils.sim_utils import SimulationData
+from utils.sim_utils import EnvironmentContext, MeasurementBatch
 from utils.init_utils import InitializationData
 
 def set_publication_style():
@@ -33,12 +33,12 @@ def set_publication_style():
 def plot_initial_guess(img_gt: np.ndarray | None, init_data: InitializationData, cfg: Config):
     """Shows ground truth (if available) and initial reconstruction seeds, and saves it."""
 
-    map_w, map_h = cfg.sim.map_size
+    map_w, map_h = cfg.env.map_size
 
     init_pos = init_data.pos.detach().cpu().numpy()
     
     # Create a blank dark background to frame the seeds nicely
-    grid_w, grid_h = int(map_w / cfg.sim.cell_size), int(map_h / cfg.sim.cell_size)
+    grid_w, grid_h = int(map_w / cfg.env.cell_size), int(map_h / cfg.env.cell_size)
     background = np.zeros((grid_h, grid_w))
 
     if img_gt is not None:
@@ -73,24 +73,25 @@ def plot_initial_guess(img_gt: np.ndarray | None, init_data: InitializationData,
     
     plt.close(fig) # Free memory
 
-def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData, results: TrainingResults, cfg: Config):
+def plot_training_results(gaussians: GasSplattingModel, batch: MeasurementBatch, environment: EnvironmentContext, results: TrainingResults, cfg: Config):
     """Saves a plot with GT, GS reconstruction, loss history (with optional RMSE), and densification events"""
 
-    map_w, map_h = cfg.sim.map_size
-    grid_w = int(map_w / cfg.sim.cell_size)
-    grid_h = int(map_h / cfg.sim.cell_size)
+    map_w, map_h = cfg.env.map_size
+    grid_w = int(map_w / cfg.env.cell_size)
+    grid_h = int(map_h / cfg.env.cell_size)
     max_map_dim = max(map_w, map_h)
 
     # Generate images
     img_pred_gaussian = gaussians.render_map(cell_size=max_map_dim / 100)
-    img_pred = gaussians.render_map(cell_size=cfg.sim.cell_size)
+    img_pred = gaussians.render_map(cell_size=cfg.env.cell_size)
     
     # Colormap min and max values
     vmin = 0
-    vmax = max(sim_data.ground_truth.max(), img_pred.max())
+    ground_truth = environment.ground_truth.gas_map
+    vmax = max(ground_truth.max(), img_pred.max())
 
     # RMSE
-    mse = np.mean((img_pred - sim_data.ground_truth)**2)
+    mse = np.mean((img_pred - ground_truth)**2)
     rmse = np.sqrt(mse)
 
     fig = plt.figure(figsize=(12, 8)) 
@@ -101,9 +102,9 @@ def plot_training_results(gaussians: GasSplattingModel, sim_data: SimulationData
     # 1. GT (Top Left)
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_title(f"Ground Truth ({grid_w}x{grid_h})")
-    im1 = ax1.imshow(sim_data.ground_truth, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
-    for i in range(len(sim_data.batch.beams)):
-        (x0, y0), (x1, y1) = sim_data.batch.beams[i]
+    im1 = ax1.imshow(ground_truth, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+    for i in range(len(batch.beams)):
+        (x0, y0), (x1, y1) = batch.beams[i]
         ax1.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
 
     # 2. Reconstruction (Top Center)

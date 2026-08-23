@@ -36,8 +36,8 @@ def evaluate_single_seed(seed, base_cfg, methods):
     warmup_worker(cfg, seed)
     
     # Real data generation for this seed
-    sim_data = generate_simulation_data(cfg)
-    gt_img = sim_data.ground_truth
+    batch, environment = generate_simulation_data(cfg)
+    gt_img = environment.ground_truth.gas_map
     
     local_results = {
         "rmse": {},
@@ -51,16 +51,16 @@ def evaluate_single_seed(seed, base_cfg, methods):
         
         # Setup model
         t_start = time.time()
-        model, _ = setup_gs_model(sim_data.batch, cfg)
+        model, _ = setup_gs_model(batch, cfg)
         setup_time = time.time() - t_start
         
         # Train
-        trainer = Trainer(model, cfg)
-        trainer.train(sim_data.batch)
+        trainer = Trainer(model, cfg, environment=environment)
+        trainer.train(batch)
         results = trainer.finish()
         
         # Evaluate
-        gs_img = model.render_map(cell_size=cfg.sim.cell_size)
+        gs_img = model.render_map(cell_size=cfg.env.cell_size)
         
         rmse, ssim_val = calculate_metrics(gt_img, gs_img)
         
@@ -199,8 +199,8 @@ def main():
         "experiment_name": "densification_methods_comparison",
         "methods": methods,
         "seeds": seeds,
-        "map_size": cfg.sim.map_size,
-        "cell_size": cfg.sim.cell_size,
+        "map_size": cfg.env.map_size,
+        "cell_size": cfg.env.cell_size,
         "num_beams": cfg.sim.num_beams
     }, results)
 

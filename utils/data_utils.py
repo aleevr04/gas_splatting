@@ -10,7 +10,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from utils.sim_utils import (
-    SimulationData, 
+    EnvironmentContext,
+    GroundTruth,
     MeasurementBatch,
     xy2cell, 
     simulate_gas_integrals, 
@@ -68,13 +69,13 @@ def load_real_tdlas_data(filepath, cfg: Config) -> MeasurementBatch:
     raw_w = max_x - min_x
     raw_h = max_y - min_y
     
-    grid_w = math.ceil(raw_w / cfg.sim.cell_size)
-    grid_h = math.ceil(raw_h / cfg.sim.cell_size)
+    grid_w = math.ceil(raw_w / cfg.env.cell_size)
+    grid_h = math.ceil(raw_h / cfg.env.cell_size)
     
     # Update new map size in cfg
-    map_w = grid_w * cfg.sim.cell_size
-    map_h = grid_h * cfg.sim.cell_size
-    cfg.sim.map_size = (map_w, map_h)
+    map_w = grid_w * cfg.env.cell_size
+    map_h = grid_h * cfg.env.cell_size
+    cfg.env.map_size = (map_w, map_h)
 
     # Return exclusively the raw measurements
     return MeasurementBatch(
@@ -87,9 +88,7 @@ def build_custom_real_scenario(
     real_data_path: str, 
     use_sim_beams: bool = True, 
     use_sim_gas: bool = False
-): 
-    # Returns Union[MeasurementBatch, SimulationData] depending on use_sim_gas
-    
+):  
     if use_sim_beams and not use_sim_gas:
         raise ValueError(
             "Invalid combination: Synthetic beams require a simulated gas map to compute meaningful measurements."
@@ -105,22 +104,22 @@ def build_custom_real_scenario(
         num_random_beams = cfg.sim.num_beams // 2
         num_radial_beams = cfg.sim.num_beams - num_random_beams 
         beams = []
-        beams += generate_random_beams(cfg.sim.map_size, num_random_beams)
-        beams += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
+        beams += generate_random_beams(cfg.env.map_size, num_random_beams)
+        beams += generate_radial_beams(cfg.env.map_size, num_radial_beams)
         
         batch.beams = torch.tensor(beams, dtype=torch.float32, device=cfg.device)
 
-    # If simulated gas is injected, we generate the ground truth and return a SimulationData object
+    # If simulated gas is injected, generate ground truth for the environment context.
     if use_sim_gas:
-        grid_w = math.ceil(cfg.sim.map_size[0] / cfg.sim.cell_size)
-        grid_h = math.ceil(cfg.sim.map_size[1] / cfg.sim.cell_size)
+        grid_w = math.ceil(cfg.env.map_size[0] / cfg.env.cell_size)
+        grid_h = math.ceil(cfg.env.map_size[1] / cfg.env.cell_size)
         gas_map = np.zeros((grid_h, grid_w))
 
         source1 = (5.0, 7.0)
         source2 = (9.0, 4.0)
 
-        s1r, s1c = xy2cell(source1, cfg.sim.cell_size)
-        s2r, s2c = xy2cell(source2, cfg.sim.cell_size)
+        s1r, s1c = xy2cell(source1, cfg.env.cell_size)
+        s2r, s2c = xy2cell(source2, cfg.env.cell_size)
 
         if 0 <= s1r < grid_h and 0 <= s1c < grid_w:
             gas_map[s1r][s1c] = 60.0
@@ -130,14 +129,13 @@ def build_custom_real_scenario(
         gas_map = gaussian_filter(gas_map, sigma=1.0)
         
         # Recompute measurements
-        measurements = simulate_gas_integrals(gas_map, batch.beams.tolist(), cfg.sim.cell_size, quiet=cfg.quiet)
+        measurements = simulate_gas_integrals(gas_map, batch.beams.tolist(), cfg.env.cell_size, quiet=cfg.quiet)
         batch.measurements = torch.tensor(measurements, dtype=torch.float32, device=cfg.device)
         
-        return SimulationData(
-            ground_truth=gas_map,
-            batch=batch,
-            y_true=batch.measurements
+        return (
+            batch,
+            EnvironmentContext(ground_truth=GroundTruth(gas_map=gas_map, y_true=batch.measurements))
         )
 
     # If no simulation is injected, return the pure real batch
-    return batch
+    return batch, EnvironmentContext()

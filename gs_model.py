@@ -16,7 +16,7 @@ class GasSplattingModel(nn.Module):
         self.initial_gaussians = initial_gaussians
         self.num_gaussians = initial_gaussians
 
-        self.map_size = torch.tensor(cfg.sim.map_size, device=cfg.device)
+        self.map_size = torch.tensor(cfg.env.map_size, device=cfg.device)
         self.densify_cfg = cfg.densify
 
         self.pos_grad_accum = torch.zeros((initial_gaussians, 1), device=cfg.device)

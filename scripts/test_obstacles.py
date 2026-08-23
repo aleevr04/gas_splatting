@@ -19,13 +19,14 @@ from utils.sim_utils import (
     generate_random_beams,
     simulate_gas_integrals,
     MeasurementBatch,
-    SimulationData
+    GroundTruth,
+    EnvironmentContext
 )
 
 def get_unblocked_beams(cfg: Config, obstacles: np.ndarray) -> list:
     """Generates random beams and filters out any that intersect with obstacles."""
     valid_beams = []
-    cell_size = cfg.sim.cell_size
+    cell_size = cfg.env.cell_size
     
     # Pre-build obstacle polygons for intersection checking
     obs_rows, obs_cols = np.where(obstacles > 0.5)
@@ -38,7 +39,7 @@ def get_unblocked_beams(cfg: Config, obstacles: np.ndarray) -> list:
     print("Generating line-of-sight beams (filtering blocked paths)...")
     while len(valid_beams) < cfg.sim.num_beams:
         # Generate a batch of candidate beams
-        candidate_beams = generate_random_beams(cfg.sim.map_size, cfg.sim.num_beams)
+        candidate_beams = generate_random_beams(cfg.env.map_size, cfg.sim.num_beams)
         
         for (x0, y0), (x1, y1) in candidate_beams:
             if len(valid_beams) >= cfg.sim.num_beams:
@@ -54,13 +55,13 @@ def get_unblocked_beams(cfg: Config, obstacles: np.ndarray) -> list:
                 
     return valid_beams
 
-def create_toy_environment(cfg: Config) -> SimulationData:
+def create_toy_environment(cfg: Config) -> tuple[MeasurementBatch, EnvironmentContext]:
     """Generates a map with a central obstacle and gas around it."""
     
     # 1. Setup Grid
-    map_w, map_h = cfg.sim.map_size
-    grid_w = int(map_w / cfg.sim.cell_size)
-    grid_h = int(map_h / cfg.sim.cell_size)
+    map_w, map_h = cfg.env.map_size
+    grid_w = int(map_w / cfg.env.cell_size)
+    grid_h = int(map_h / cfg.env.cell_size)
     
     # 2. Create Obstacles (e.g., a square block in the middle)
     obstacles = np.zeros((grid_h, grid_w))
@@ -81,24 +82,26 @@ def create_toy_environment(cfg: Config) -> SimulationData:
     # 4. Generate Beams and Measurements
     beams_list = get_unblocked_beams(cfg, obstacles)
     print("Simulating gas integrals...")
-    measurements_list = simulate_gas_integrals(gas_gt, beams_list, cfg.sim.cell_size)
+    measurements_list = simulate_gas_integrals(gas_gt, beams_list, cfg.env.cell_size)
     
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
     
-    return SimulationData(
-        ground_truth=gas_gt,
-        batch=MeasurementBatch(beams=beams_tensor, measurements=y_true),
-        y_true=y_true,
-        obstacles=obstacles
+    return (
+        MeasurementBatch(beams=beams_tensor, measurements=y_true),
+        EnvironmentContext(
+            obstacles=obstacles,
+            ground_truth=GroundTruth(gas_map=gas_gt, y_true=y_true)
+        )
     )
 
-def run_test(test_name: str, cfg: Config, sim_data: SimulationData):
+def run_test(test_name: str, cfg: Config, data: tuple[MeasurementBatch, EnvironmentContext]):
     print(f"\n--- Running Test: {test_name} ---")
+    batch, environment = data
     
     # --- Initialization ---
     t0 = time.time()
-    model, _ = setup_gs_model(sim_data.batch, cfg)
+    model, _ = setup_gs_model(batch, cfg)
     setup_time = time.time() - t0
     print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
     
@@ -106,11 +109,10 @@ def run_test(test_name: str, cfg: Config, sim_data: SimulationData):
     trainer = Trainer(
         model=model, 
         cfg=cfg, 
-        ground_truth=sim_data.ground_truth, 
-        obstacles=sim_data.obstacles
+        environment=environment
     )
     
-    batch_results = trainer.train(sim_data.batch)
+    batch_results = trainer.train(batch)
     training_results = trainer.finish()
     
     # --- Rename the generated GIF ---
@@ -129,7 +131,7 @@ def run_test(test_name: str, cfg: Config, sim_data: SimulationData):
         print(f"[{test_name}] Saved training GIF to {new_gif_path}")
     
     # Render final map to evaluate gas inside obstacles
-    final_map = model.render_map(cfg.sim.cell_size)
+    final_map = model.render_map(cfg.env.cell_size)
     gas_in_obstacles = np.sum(final_map * sim_data.obstacles)
     
     print(f"[{test_name}] Setup Time: {setup_time:.3f}s | Training Time: {training_results.training_time:.3f}s")
@@ -176,12 +178,12 @@ def main():
     red_cmap = mcolors.ListedColormap(['none', 'red'])
     
     # Ground Truth
-    axes[0].imshow(sim_data.ground_truth, origin='lower')
+    axes[0].imshow(environment.ground_truth.gas_map, origin='lower')
     axes[0].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
     
     # Plot Beams (converted from meters to cell coordinates)
-    beams_np = sim_data.batch.beams.cpu().numpy()
-    cell_size = cfg.sim.cell_size
+    beams_np = batch.beams.cpu().numpy()
+    cell_size = cfg.env.cell_size
     for i in range(beams_np.shape[0]):
         x0 = beams_np[i, 0, 0] / cell_size
         y0 = beams_np[i, 0, 1] / cell_size
@@ -192,23 +194,23 @@ def main():
     axes[0].set_title("Ground Truth, Obstacle & Beams")
     
     # Baseline
-    axes[1].imshow(results['Baseline']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
+    axes[1].imshow(results['Baseline']['map'], origin='lower', vmin=0, vmax=environment.ground_truth.gas_map.max())
     axes[1].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
     axes[1].set_title(f"Baseline\nTime: {results['Baseline']['time']:.1f}s | Obs Gas: {results['Baseline']['gas_in_obs']:.1f}")
     
     # SDF Repulsion (Low Weight)
-    axes[2].imshow(results['SDF_Low']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
+    axes[2].imshow(results['SDF_Low']['map'], origin='lower', vmin=0, vmax=environment.ground_truth.gas_map.max())
     axes[2].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
     axes[2].set_title(f"SDF Repulsion (λ=0.1)\nTime: {results['SDF_Low']['time']:.1f}s | Obs Gas: {results['SDF_Low']['gas_in_obs']:.1f}")
     
     # SDF Repulsion (High Weight)
-    axes[3].imshow(results['SDF_High']['map'], origin='lower', vmin=0, vmax=sim_data.ground_truth.max())
+    axes[3].imshow(results['SDF_High']['map'], origin='lower', vmin=0, vmax=environment.ground_truth.gas_map.max())
     axes[3].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
     axes[3].set_title(f"SDF Repulsion (λ=1.0)\nTime: {results['SDF_High']['time']:.1f}s | Obs Gas: {results['SDF_High']['gas_in_obs']:.1f}")
     
     # Set the limits of the axes to prevent the plot from expanding past the image boundaries
-    grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-    grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+    grid_w = int(cfg.env.map_size[0] / cfg.env.cell_size)
+    grid_h = int(cfg.env.map_size[1] / cfg.env.cell_size)
     for ax in axes:
         ax.set_xlim(-0.5, grid_w - 0.5)
         ax.set_ylim(-0.5, grid_h - 0.5)

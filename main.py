@@ -21,34 +21,34 @@ def main():
     if not quiet: print(f"Using device: {cfg.device}")
 
     # --- Simulation ---
-    sim_data = generate_simulation_data(cfg)
+    batch, environment = generate_simulation_data(cfg)
 
     # --- Initialization ---
     t0 = time.time()
-    model, init_data = setup_gs_model(sim_data.batch, cfg)
+    model, init_data = setup_gs_model(batch, cfg)
     setup_time = time.time() - t0
     if not quiet: print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
 
-    plot_initial_guess(sim_data.ground_truth, init_data, cfg)
+    plot_initial_guess(environment.ground_truth.gas_map, init_data, cfg)
 
     # --- Training ---
-    trainer = Trainer(model, cfg, ground_truth=sim_data.ground_truth)
+    trainer = Trainer(model, cfg, environment=environment)
 
     if not quiet: print("Starting Gas Splatting training...")
-    trainer.train(sim_data.batch)
+    trainer.train(batch)
     results = trainer.finish()
     if not quiet: print(f"Loss: {results.loss_history[-1]:.6f}")
     if not quiet: print(f"Setup Time: {setup_time:.3f}s | Training Time: {results.training_time:.3f}s")
 
     # --- Plot Results ---
-    plot_training_results(model, sim_data, results, cfg)
+    plot_training_results(model, batch, environment, results, cfg)
 
     # --- Save Results ---
     metadata = {
         "experiment_name": "training",
         "num_beams": cfg.sim.num_beams,
-        "map_size": cfg.sim.map_size,
-        "cell_size": cfg.sim.cell_size
+        "map_size": cfg.env.map_size,
+        "cell_size": cfg.env.cell_size
     }
 
     results = {

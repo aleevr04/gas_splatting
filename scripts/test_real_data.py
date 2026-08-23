@@ -11,18 +11,18 @@ from config import Config
 from trainer import Trainer
 from gs_model import GasSplattingModel
 from utils.init_utils import InitializationData, setup_gs_model
-from utils.sim_utils import SimulationData, MeasurementBatch
+from utils.sim_utils import EnvironmentContext, MeasurementBatch
 from utils.data_utils import build_custom_real_scenario
 from utils.plot_utils import plot_initial_guess, set_publication_style
 
 def plot_real_results(model: GasSplattingModel, batch_data: MeasurementBatch, results, cfg: Config, save_path):
-    img_pred = model.render_map(cell_size=cfg.sim.cell_size)
-    map_w, map_h = cfg.sim.map_size
+    img_pred = model.render_map(cell_size=cfg.env.cell_size)
+    map_w, map_h = cfg.env.map_size
     
     fig, (ax_map, ax_loss) = plt.subplots(1, 2, figsize=(12, 5))
     
     # --- Reconstruction ---
-    ax_map.set_title(f"GS Reconstruction (cell size = {cfg.sim.cell_size}m)\nGaussians: {model.num_gaussians}")
+    ax_map.set_title(f"GS Reconstruction (cell size = {cfg.env.cell_size}m)\nGaussians: {model.num_gaussians}")
     im = ax_map.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
     
     ax_map.set_xlim(0, map_w)
@@ -84,7 +84,7 @@ def main():
     
     # Load data
     data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json') 
-    data = build_custom_real_scenario(
+    batch, environment = build_custom_real_scenario(
         cfg=cfg,
         real_data_path=data_path,
         use_sim_beams=args.sim_beams,
@@ -92,12 +92,7 @@ def main():
     )
 
     # Safely extract batch and ground_truth
-    if isinstance(data, SimulationData):
-        batch = data.batch
-        gt_img = data.ground_truth
-    else:
-        batch = data
-        gt_img = None
+    gt_img = environment.ground_truth.gas_map if environment.ground_truth is not None else None
 
     # ----- MODEL INITIALIZATION AND TRAINING ------
     if args.force_init:

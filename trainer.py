@@ -10,7 +10,7 @@ from typing import List, Dict
 
 from config import Config
 from gs_model import GasSplattingModel
-from utils.sim_utils import MeasurementBatch, extract_candidate_positions
+from utils.sim_utils import EnvironmentContext, MeasurementBatch, extract_candidate_positions
 from utils.live_vis import LiveVisualizer
 
 
@@ -38,13 +38,13 @@ def get_exp_lr_func(lr_init, lr_final, max_steps):
     return lr_func
 
 class Trainer:
-    def __init__(self, model: GasSplattingModel, cfg: Config, ground_truth: np.ndarray | None = None, obstacles: np.ndarray | None = None, max_buffer_size: int | None = None):
+    def __init__(self, model: GasSplattingModel, cfg: Config, environment: EnvironmentContext | None = None, max_buffer_size: int | None = None):
         self.model = model
-        self.ground_truth = ground_truth
+        self.ground_truth = environment.ground_truth.gas_map if environment and environment.ground_truth else None
         self.cfg = cfg
         self.visualizer = LiveVisualizer(cfg) if self.cfg.train.live_vis else None
-        if self.visualizer and ground_truth is not None: 
-            self.visualizer.set_ground_truth(ground_truth)
+        if self.visualizer and self.ground_truth is not None:
+            self.visualizer.set_ground_truth(self.ground_truth)
         self.results = TrainingResults()
         self.global_iteration = 0
 
@@ -52,7 +52,8 @@ class Trainer:
         self.sdf_tensor = None
         self.sdf_grad_tensor = None
         
-        if obstacles is not None:
+        if environment and environment.obstacles is not None:
+            obstacles = environment.obstacles
             free_space = (obstacles <= 0.5)
             occupied_space = (obstacles > 0.5)
             
@@ -60,7 +61,7 @@ class Trainer:
             dist_inside = np.asarray(ndimage.distance_transform_edt(occupied_space))
             
             # SDF field in meters
-            sdf_physical = (dist_outside - dist_inside) * cfg.sim.cell_size
+            sdf_physical = (dist_outside - dist_inside) * cfg.env.cell_size
             
             # Compute spatial gradients (normals) using numpy
             # np.gradient returns (gradient_y, gradient_x) for a 2D array
@@ -312,7 +313,7 @@ class Trainer:
             
             # --- Model evaluation ---
             if self.cfg.train.do_eval and iteration % self.cfg.train.eval_interval == 0:
-                current_map = self.model.render_map(cell_size=self.cfg.sim.cell_size)
+                current_map = self.model.render_map(cell_size=self.cfg.env.cell_size)
                 rmse = np.sqrt(np.mean((current_map - self.ground_truth)**2))
                 self.results.rmse_history[self.global_iteration] = rmse
             # ----------------------------

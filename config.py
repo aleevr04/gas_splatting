@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from simple_parsing import field
 
 @dataclass
-class SimulationParams:
-    seed: Optional[int] = None # Random seed for GT generation
-    gt_file: Optional[str] = None # csv file containing gas distribution data 
-
+class EnvironmentParams:
     map_size: Tuple[float, float] = (20.0, 20.0) # Map size (map_width, map_height) in meters. Ignored when a csv file is provided
     cell_size: float = 1.0 # Cell size in meters
 
+@dataclass
+class SimulationParams:
+    seed: Optional[int] = None # Random seed for GT generation
+    gt_file: Optional[str] = None # csv file containing gas distribution data 
     num_beams: int = 50 # Total number of TDLAS beams
     
     noise: bool = field(default=False, action="store_true") # Add noise to simulated measurements
@@ -49,6 +50,7 @@ class DensificationParams:
 
 @dataclass
 class Config:
+    env: EnvironmentParams
     sim: SimulationParams
     train: TrainParams
     densify: DensificationParams

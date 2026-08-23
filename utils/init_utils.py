@@ -20,7 +20,7 @@ def injection_initialization(batch: MeasurementBatch, cfg: Config):
     Initializes Gaussians based on high-concentration beams using Continuous Spatial NMS.
     """
     # Dynamic scale
-    map_w, map_h = cfg.sim.map_size
+    map_w, map_h = cfg.env.map_size
     init_std_val = min(map_w, map_h) * 0.1
     
     final_pos = extract_candidate_positions(

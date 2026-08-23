@@ -57,18 +57,18 @@ def warmup_worker(cfg, seed):
     """Executes a tiny run to wake up JIT/PyTorch and prevent cold start penalties."""
     warmup_cfg = copy.deepcopy(cfg)
     warmup_res = 20
-    warmup_cfg.sim.cell_size = warmup_cfg.sim.map_size[0] / warmup_res
+    warmup_cfg.env.cell_size = warmup_cfg.env.map_size[0] / warmup_res
     warmup_cfg.train.iterations = 5 
     
-    warmup_sim = generate_simulation_data(warmup_cfg)
+    warmup_batch, warmup_environment = generate_simulation_data(warmup_cfg)
     _ = create_system_matrix_sparse(
         (warmup_res, warmup_res), 
-        warmup_sim.batch.beams.tolist(), 
-        warmup_cfg.sim.cell_size,
+        warmup_batch.beams.tolist(),
+        warmup_cfg.env.cell_size,
         quiet=True
     ).tocsr()
 
-    run_gas_splatting(batch=warmup_sim.batch, cfg=warmup_cfg, ground_truth=warmup_sim.ground_truth)
+    run_gas_splatting(batch=warmup_batch, cfg=warmup_cfg, environment=warmup_environment)
 
 def yield_parallel_experiment(worker_func, seeds, max_workers=4, **kwargs):
     """

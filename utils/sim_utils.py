@@ -13,26 +13,21 @@ from config import Config
 
 @dataclass
 class MeasurementBatch:
-    """
-    Sensor readings and their geometries.
-    """
+    """Sensor readings and their geometries."""
     beams: torch.Tensor         # Shape: (N, 2, 2)
     measurements: torch.Tensor  # Shape: (N,)
 
 @dataclass
-class SimulationData:
-    """
-    Represents a complete simulated world. 
-    It holds the ground truth and the resulting sensor readings.
-    """
-    ground_truth: np.ndarray    # Shape: (H, W)
-    batch: MeasurementBatch
-    
-    # Noise-free measurements
-    y_true: torch.Tensor        # Shape: (N,)
-    
-    # Obstacle occupancy grid
+class GroundTruth:
+    """Holds perfect knowledge of the world."""
+    gas_map: np.ndarray         # Shape: (H, W)
+    y_true: torch.Tensor        # Shape: (N,) - Noise-free measurements
+
+@dataclass
+class EnvironmentContext:
+    """Static physical properties of the environment."""
     obstacles: np.ndarray | None = None
+    ground_truth: GroundTruth | None = None
 
 
 # ==========================================
@@ -299,7 +294,7 @@ def add_measurement_noise(y_true, snr_db=30):
     y_noisy[y_noisy < 0] = 0
     return torch.tensor(y_noisy, dtype=torch.float32, device=y_true.device)
 
-def generate_simulation_data(cfg: Config) -> SimulationData:
+def generate_simulation_data(cfg: Config) -> tuple[MeasurementBatch, EnvironmentContext]:
     """Generates gas distribution (ground truth), beams and measurements"""
     
     if cfg.sim.seed:
@@ -315,14 +310,14 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
         img_gt = np.loadtxt(cfg.sim.gt_file, delimiter=',')
        
         rows, cols = img_gt.shape
-        map_w = cols * cfg.sim.cell_size
-        map_h = rows * cfg.sim.cell_size
-        cfg.sim.map_size = (map_w, map_h)
+        map_w = cols * cfg.env.cell_size
+        map_h = rows * cfg.env.cell_size
+        cfg.env.map_size = (map_w, map_h)
     else:
         if not quiet: print("Generating procedural ground truth...")
-        map_w, map_h = cfg.sim.map_size
-        grid_w = int(map_w / cfg.sim.cell_size)
-        grid_h = int(map_h / cfg.sim.cell_size)
+        map_w, map_h = cfg.env.map_size
+        grid_w = int(map_w / cfg.env.cell_size)
+        grid_h = int(map_h / cfg.env.cell_size)
 
         img_gt = generate_fractal_gas_distribution(grid_size=(grid_h, grid_w))
 
@@ -333,13 +328,13 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     num_random_beams = cfg.sim.num_beams // 2
     num_radial_beams = cfg.sim.num_beams - num_random_beams 
         
-    beams_list += generate_random_beams(cfg.sim.map_size, num_random_beams)
-    beams_list += generate_radial_beams(cfg.sim.map_size, num_radial_beams)
+    beams_list += generate_random_beams(cfg.env.map_size, num_random_beams)
+    beams_list += generate_radial_beams(cfg.env.map_size, num_radial_beams)
 
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
 
     # ------- Measurements --------
-    measurements_list = simulate_gas_integrals(img_gt, beams_list, cfg.sim.cell_size, quiet=quiet)
+    measurements_list = simulate_gas_integrals(img_gt, beams_list, cfg.env.cell_size, quiet=quiet)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
 
     if cfg.sim.noise:
@@ -352,10 +347,9 @@ def generate_simulation_data(cfg: Config) -> SimulationData:
     else:
         measurements = y_true
 
-    return SimulationData(
-        ground_truth=img_gt,
-        batch=MeasurementBatch(beams=beams_tensor, measurements=measurements),
-        y_true=y_true
+    return (
+        MeasurementBatch(beams=beams_tensor, measurements=measurements),
+        EnvironmentContext(ground_truth=GroundTruth(gas_map=img_gt, y_true=y_true))
     )
 
 # ================================

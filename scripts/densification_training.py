@@ -23,8 +23,8 @@ def main():
     base_cfg = args.cfg
     base_cfg.train.early_stopping_patience = base_cfg.train.iterations # Deactivate early stopping
     
-    sim_data = generate_simulation_data(base_cfg)
-    gt_img = sim_data.ground_truth
+    batch, environment = generate_simulation_data(base_cfg)
+    gt_img = environment.ground_truth.gas_map
     
     methods = ["Original Densification", "Proposed Strategy"]
     results = {}
@@ -38,14 +38,14 @@ def main():
         test_cfg.train.do_eval = True
         test_cfg.train.eval_interval = 25
         
-        model, _ = setup_gs_model(sim_data.batch, test_cfg)
-        trainer = Trainer(model, test_cfg, ground_truth=gt_img)
+        model, _ = setup_gs_model(batch, test_cfg)
+        trainer = Trainer(model, test_cfg, environment=environment)
         
-        trainer.train(sim_data.batch)
+        trainer.train(batch)
         train_results = trainer.finish()
 
         # Render the final 2D image
-        gs_img = model.render_map(cell_size=test_cfg.sim.cell_size)
+        gs_img = model.render_map(cell_size=test_cfg.env.cell_size)
         
         # Store all relevant data
         results[method] = {
@@ -60,7 +60,7 @@ def main():
     # --- Plotting ---
     set_publication_style()
     
-    map_w, map_h = base_cfg.sim.map_size
+    map_w, map_h = base_cfg.env.map_size
     extent = (0, map_w, 0, map_h)
     vmin = 0
     vmax = max(gt_img.max(), results[methods[0]]["img"].max(), results[methods[1]]["img"].max())

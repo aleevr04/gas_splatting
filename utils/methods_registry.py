@@ -1,17 +1,16 @@
 import time
-import numpy as np
 from scipy.sparse import csr_matrix
 
 import utils.tomo_utils as tm
 from utils.init_utils import setup_gs_model
-from utils.sim_utils import MeasurementBatch
+from utils.sim_utils import EnvironmentContext, MeasurementBatch
 from config import Config
 from trainer import Trainer
 
 def get_tomo_inputs(batch: MeasurementBatch, cfg: Config):
     """Helper to prevent repeating grid math and tensor conversions."""
-    grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-    grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+    grid_w = int(cfg.env.map_size[0] / cfg.env.cell_size)
+    grid_h = int(cfg.env.map_size[1] / cfg.env.cell_size)
     measurements = batch.measurements.cpu().numpy()
     return (grid_h, grid_w), measurements
 
@@ -27,7 +26,7 @@ def run_rbf_sart(batch: MeasurementBatch, cfg: Config, system_matrix: csr_matrix
     grid_size, measurements = get_tomo_inputs(batch, cfg)
 
     t0 = time.time()
-    res = tm.rbf_sart(system_matrix, measurements, grid_size=grid_size, cell_size_m=cfg.sim.cell_size, quiet=cfg.quiet)
+    res = tm.rbf_sart(system_matrix, measurements, grid_size=grid_size, cell_size_m=cfg.env.cell_size, quiet=cfg.quiet)
     recon_time = time.time() - t0
     return res, matrix_setup_time + recon_time
 
@@ -47,15 +46,15 @@ def run_ltd(batch: MeasurementBatch, cfg: Config, system_matrix: csr_matrix, mat
     recon_time = time.time() - t0
     return res, matrix_setup_time + recon_time
 
-def run_gas_splatting(batch: MeasurementBatch, cfg: Config, ground_truth: np.ndarray | None = None, **kwargs):
+def run_gas_splatting(batch: MeasurementBatch, cfg: Config, environment: EnvironmentContext | None = None, **kwargs):
     t_start = time.time()
     model, _ = setup_gs_model(batch, cfg)
     gs_setup_time = time.time() - t_start
 
-    trainer = Trainer(model, cfg, ground_truth)
+    trainer = Trainer(model, cfg, environment=environment)
     trainer.train(batch)
     results = trainer.finish()
-    gs_img = model.render_map(cell_size=cfg.sim.cell_size)
+    gs_img = model.render_map(cell_size=cfg.env.cell_size)
     
     return gs_img, gs_setup_time + results.training_time
 

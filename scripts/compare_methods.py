@@ -11,8 +11,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from utils.sim_utils import (
-    SimulationData, 
     MeasurementBatch, 
+    EnvironmentContext,
     generate_simulation_data, 
     create_system_matrix_sparse
 )
@@ -36,28 +36,23 @@ def main():
     print(f"--- Generating Simulation Data ---")
     if args.real_scenario:
         data_path = os.path.join(os.path.dirname(__file__), '..', 'real_data', 'full_sweep.json')
-        data = build_custom_real_scenario(
+        batch, environment = build_custom_real_scenario(
             real_data_path=data_path,
             cfg=cfg,
             use_sim_beams=args.sim_beams,
             use_sim_gas=args.sim_gas
         )
     else:
-        data = generate_simulation_data(cfg)
+        batch, environment = generate_simulation_data(cfg)
     
     # Safely extract batch and ground_truth
-    if isinstance(data, SimulationData):
-        batch = data.batch
-        gt_img = data.ground_truth
-    else:
-        batch = data
-        gt_img = None
+    gt_img = environment.ground_truth.gas_map if environment.ground_truth is not None else None
     
-    extent = (0, cfg.sim.map_size[0], 0, cfg.sim.map_size[1])
+    extent = (0, cfg.env.map_size[0], 0, cfg.env.map_size[1])
     
     # Calculate grid size mathematically since gt_img might not exist
-    grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-    grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+    grid_w = int(cfg.env.map_size[0] / cfg.env.cell_size)
+    grid_h = int(cfg.env.map_size[1] / cfg.env.cell_size)
     grid_size = (grid_h, grid_w)
     
     methods = list(AVAILABLE_METHODS.keys())
@@ -66,7 +61,7 @@ def main():
     
     # --- Matrix Setup ---
     t_setup_start = time.time()
-    system_matrix = create_system_matrix_sparse(grid_size, batch.beams.tolist(), cfg.sim.cell_size).tocsr()
+    system_matrix = create_system_matrix_sparse(grid_size, batch.beams.tolist(), cfg.env.cell_size).tocsr()
     matrix_setup_time = time.time() - t_setup_start
 
     # --- Execution Loop ---
@@ -80,7 +75,7 @@ def main():
         res_img, total_time = func(
             batch=batch, 
             cfg=cfg, 
-            ground_truth=gt_img,
+            environment=environment,
             system_matrix=system_matrix, 
             matrix_setup_time=matrix_setup_time
         )

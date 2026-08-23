@@ -40,21 +40,21 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
 
     # We generate simulation data ONCE, with maximum number of beams
     cfg.sim.num_beams = max(num_beams_list)
-    base_sim_data = generate_simulation_data(cfg)
-    gt_img = base_sim_data.ground_truth
+    base_batch, base_environment = generate_simulation_data(cfg)
+    gt_img = base_environment.ground_truth.gas_map
 
     for n_beams in num_beams_list:
         # Select only the number of beams needed for this iteration
         batch = MeasurementBatch(
-            beams=base_sim_data.batch.beams[:n_beams],
-            measurements=base_sim_data.batch.measurements[:n_beams]
+            beams=base_batch.beams[:n_beams],
+            measurements=base_batch.measurements[:n_beams]
         )
 
-        grid_w = int(cfg.sim.map_size[0] / cfg.sim.cell_size)
-        grid_h = int(cfg.sim.map_size[1] / cfg.sim.cell_size)
+        grid_w = int(cfg.env.map_size[0] / cfg.env.cell_size)
+        grid_h = int(cfg.env.map_size[1] / cfg.env.cell_size)
 
         matrix_setup_start = time.time()
-        system_matrix = create_system_matrix_sparse((grid_w, grid_h), batch.beams.tolist(), cfg.sim.cell_size, quiet=True).tocsr()
+        system_matrix = create_system_matrix_sparse((grid_w, grid_h), batch.beams.tolist(), cfg.env.cell_size, quiet=True).tocsr()
         matrix_setup_time = time.time() - matrix_setup_start
         
         for method_name in methods:
@@ -63,7 +63,7 @@ def evaluate_single_seed(seed, base_cfg, num_beams_list, methods):
             res_img, total_time = func(
                 batch=batch, 
                 cfg=cfg, 
-                ground_truth=gt_img,
+                environment=base_environment,
                 system_matrix=system_matrix,
                 matrix_setup_time=matrix_setup_time
             )
@@ -134,8 +134,8 @@ def main():
         "experiment_name": "num_beams",
         "num_beams_list": num_beams_list,
         "seeds": seeds,
-        "map_size": cfg.sim.map_size,
-        "cell_size": cfg.sim.cell_size
+        "map_size": cfg.env.map_size,
+        "cell_size": cfg.env.cell_size
     }, results)
 
     # --- Plot results ---
