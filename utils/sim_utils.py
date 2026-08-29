@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter
+from shapely.geometry import LineString, Point
 
 from config import Config
 from utils.geometry_utils import iter_ray_cell_intersections
@@ -185,7 +186,104 @@ def generate_horizontal_vertical_beams(map_size_m: tuple, num_beams: int):
 
     return beams
 
-def simulate_gas_integrals(gas_concentration_map: np.ndarray, beams: list, cell_dimensions_meters: float, quiet: bool = False) -> list[float]:
+
+def generate_simple_beams(map_size_m: tuple[float, float], num_beams: int, seed: int | None = None):
+    """Generate a lightweight mixed beam set using the simple beam layouts already in this module."""
+    if num_beams <= 0:
+        return []
+    if seed is not None:
+        np.random.seed(seed)
+
+    generators = [
+        generate_random_beams,
+        generate_radial_beams,
+        generate_horizontal_vertical_beams,
+    ]
+
+    counts = [num_beams // len(generators)] * len(generators)
+    for idx in range(num_beams % len(generators)):
+        counts[idx] += 1
+
+    beams = []
+    for generator, count in zip(generators, counts):
+        if count > 0:
+            beams.extend(generator(map_size_m, count))
+
+    return beams[:num_beams]
+
+
+def _intersection_points(geometry):
+    """Yield representative points from a ray/obstacle intersection."""
+    if geometry.is_empty:
+        return
+    if geometry.geom_type == "Point":
+        yield geometry
+    elif geometry.geom_type in {"MultiPoint", "GeometryCollection"}:
+        for item in geometry.geoms:
+            yield from _intersection_points(item)
+    elif geometry.geom_type in {"LineString", "MultiLineString"}:
+        for item in geometry.geoms if hasattr(geometry, "geoms") else [geometry]:
+            yield Point(item.coords[0])
+            yield Point(item.coords[-1])
+
+def generate_obstacle_aware_beams(
+    map_size_m: tuple[float, float],
+    num_beams: int,
+    obstacle_geometry=None,
+    seed: int | None = None,
+) -> list:
+    """Generate beam geometries from the existing simple layout and clip them at obstacles."""
+    if num_beams <= 0:
+        return []
+    if seed is not None:
+        np.random.seed(seed)
+
+    if obstacle_geometry is None:
+        return generate_simple_beams(map_size_m, num_beams, seed=seed)
+
+    beams = []
+    candidate_count = max(num_beams * 10, 100)
+    candidate_beams = generate_simple_beams(map_size_m, candidate_count, seed=seed)
+
+    for (x0, y0), (x1, y1) in candidate_beams:
+        line = LineString([(x0, y0), (x1, y1)])
+        total_length = line.length
+        if total_length <= 1e-8:
+            continue
+
+        start_point = Point(x0, y0)
+        if obstacle_geometry.covers(start_point):
+            continue
+
+        closest_distance = total_length
+        for point in _intersection_points(line.intersection(obstacle_geometry)):
+            distance = start_point.distance(point)
+            if 1e-6 < distance < closest_distance:
+                closest_distance = distance
+
+        if closest_distance < total_length:
+            clipped = line.interpolate(closest_distance)
+            endpoint = (clipped.x, clipped.y)
+        else:
+            endpoint = (x1, y1)
+
+        beams.append(((x0, y0), endpoint))
+        if len(beams) >= num_beams:
+            return beams[:num_beams]
+
+    if len(beams) < num_beams:
+        raise RuntimeError(
+            f"Could only generate {len(beams)} obstacle-aware beams out of {num_beams}."
+        )
+    return beams[:num_beams]
+
+
+def simulate_gas_integrals(
+    gas_concentration_map: np.ndarray,
+    beams: list,
+    cell_dimensions_meters: float,
+    quiet: bool = False
+) -> list[float]:
     """Simulates a TDLAS raytracing measurement with path length calculation within cells."""
     integral_concentrations = []
     rows, cols = gas_concentration_map.shape
@@ -253,13 +351,11 @@ def generate_simulation_data(cfg: Config) -> tuple[MeasurementBatch, Environment
 
     # ------ Beams ------
     if not quiet: print("Generating beams...")
-    beams_list = []
-
-    num_random_beams = cfg.sim.num_beams // 2
-    num_radial_beams = cfg.sim.num_beams - num_random_beams 
-        
-    beams_list += generate_random_beams(cfg.env.map_size, num_random_beams)
-    beams_list += generate_radial_beams(cfg.env.map_size, num_radial_beams)
+    beams_list = generate_simple_beams(
+        cfg.env.map_size,
+        cfg.sim.num_beams,
+        seed=cfg.sim.seed,
+    )
 
     beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
 

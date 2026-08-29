@@ -1,223 +1,246 @@
+import copy
 import os
 import sys
-import copy
 import time
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
+
 import matplotlib.colors as mcolors
-from shapely.geometry import LineString, Polygon
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from scipy.ndimage import binary_dilation
 from simple_parsing import ArgumentParser
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from trainer import Trainer
+from utils.experiment_utils import rmse_loss, save_experiment_results
 from utils.init_utils import setup_gs_model
+from utils.obstacle_utils import SCENARIOS, create_obstacle_scenario, obstacle_mask_to_geometry
 from utils.sim_utils import (
-    generate_fractal_gas_distribution,
-    generate_random_beams,
-    simulate_gas_integrals,
-    MeasurementBatch,
+    EnvironmentContext,
     GroundTruth,
-    EnvironmentContext
+    MeasurementBatch,
+    generate_fractal_gas_distribution,
+    generate_obstacle_aware_beams,
+    simulate_gas_integrals,
 )
 
-def get_unblocked_beams(cfg: Config, obstacles: np.ndarray) -> list:
-    """Generates random beams and filters out any that intersect with obstacles."""
-    valid_beams = []
-    cell_size = cfg.env.cell_size
-    
-    # Pre-build obstacle polygons for intersection checking
-    obs_rows, obs_cols = np.where(obstacles > 0.5)
-    obs_polys = []
-    for r, c in zip(obs_rows, obs_cols):
-        x_min, x_max = c * cell_size, (c + 1) * cell_size
-        y_min, y_max = r * cell_size, (r + 1) * cell_size
-        obs_polys.append(Polygon([(x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)]))
-        
-    print("Generating line-of-sight beams (filtering blocked paths)...")
-    while len(valid_beams) < cfg.sim.num_beams:
-        # Generate a batch of candidate beams
-        candidate_beams = generate_random_beams(cfg.env.map_size, cfg.sim.num_beams)
-        
-        for (x0, y0), (x1, y1) in candidate_beams:
-            if len(valid_beams) >= cfg.sim.num_beams:
-                break
-                
-            beam_line = LineString([(x0, y0), (x1, y1)])
-            
-            # Check if the beam intersects any obstacle polygon
-            blocked = any(beam_line.intersects(poly) for poly in obs_polys)
-            
-            if not blocked:
-                valid_beams.append(((x0, y0), (x1, y1)))
-                
-    return valid_beams
 
-def create_toy_environment(cfg: Config) -> tuple[MeasurementBatch, EnvironmentContext]:
-    """Generates a map with a central obstacle and gas around it."""
-    
-    # 1. Setup Grid
+PENALTY_WEIGHTS = (0.0, 0.1, 1.0)
+
+
+def validate_grid(cfg: Config) -> tuple[int, int]:
+    """Return grid dimensions and reject inconsistent physical dimensions."""
     map_w, map_h = cfg.env.map_size
-    grid_w = int(map_w / cfg.env.cell_size)
-    grid_h = int(map_h / cfg.env.cell_size)
-    
-    # 2. Create Obstacles (e.g., a square block in the middle)
-    obstacles = np.zeros((grid_h, grid_w))
-    obs_min_x, obs_max_x = int(grid_w * 0.3), int(grid_w * 0.7)
-    obs_min_y, obs_max_y = int(grid_h * 0.3), int(grid_h * 0.7)
-    obstacles[obs_min_y:obs_max_y, obs_min_x:obs_max_x] = 1.0
-    
-    # 3. Create Gas Distribution
+    width_cells = map_w / cfg.env.cell_size
+    height_cells = map_h / cfg.env.cell_size
+    if not np.isclose(width_cells, round(width_cells)) or not np.isclose(height_cells, round(height_cells)):
+        raise ValueError("map_size dimensions must be divisible by cell_size")
+    return int(round(height_cells)), int(round(width_cells))
+
+
+def create_toy_environment(
+    cfg: Config,
+    scenario: str,
+) -> tuple[MeasurementBatch, EnvironmentContext]:
+    """Create gas, obstacles, and measurements for one obstacle scenario."""
+    grid_h, grid_w = validate_grid(cfg)
+    obstacles = create_obstacle_scenario(scenario, (grid_h, grid_w))
+
     gas_gt = generate_fractal_gas_distribution(
-        grid_size=(grid_h, grid_w), 
-        scale_fraction=0.3, 
-        center_bias=0.0
+        grid_size=(grid_h, grid_w), scale_fraction=0.3, center_bias=0.0
     )
-    
-    # Mask out the gas inside the obstacle
     gas_gt[obstacles > 0.5] = 0.0
-    
-    # 4. Generate Beams and Measurements
-    beams_list = get_unblocked_beams(cfg, obstacles)
-    print("Simulating gas integrals...")
-    measurements_list = simulate_gas_integrals(gas_gt, beams_list, cfg.env.cell_size)
-    
-    beams_tensor = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
+
+    obstacle_geometry = obstacle_mask_to_geometry(obstacles, cfg.env.cell_size)
+    beams_list = generate_obstacle_aware_beams(
+        cfg.env.map_size,
+        cfg.sim.num_beams,
+        obstacle_geometry=obstacle_geometry,
+        seed=cfg.sim.seed,
+    )
+    measurements_list = simulate_gas_integrals(
+        gas_gt, beams_list, cfg.env.cell_size, quiet=cfg.quiet
+    )
+    beams = torch.tensor(beams_list, dtype=torch.float32, device=cfg.device)
     y_true = torch.tensor(measurements_list, dtype=torch.float32, device=cfg.device)
-    
+
     return (
-        MeasurementBatch(beams=beams_tensor, measurements=y_true),
+        MeasurementBatch(beams=beams, measurements=y_true),
         EnvironmentContext(
             obstacles=obstacles,
-            ground_truth=GroundTruth(gas_map=gas_gt, y_true=y_true)
-        )
+            ground_truth=GroundTruth(gas_map=gas_gt, y_true=y_true),
+        ),
     )
 
-def run_test(test_name: str, cfg: Config, data: tuple[MeasurementBatch, EnvironmentContext]):
-    print(f"\n--- Running Test: {test_name} ---")
+
+def calculate_metrics(
+    final_map: np.ndarray,
+    batch: MeasurementBatch,
+    environment: EnvironmentContext,
+    model: torch.nn.Module,
+) -> dict[str, float]:
+    """Calculate obstacle, reconstruction, and measurement metrics."""
+    ground_truth = environment.ground_truth.gas_map
+    occupied = environment.obstacles > 0.5
+    free = ~occupied
+    boundary = binary_dilation(occupied, iterations=1) & free
+    free_area = max(int(free.sum()), 1)
+    boundary_area = max(int(boundary.sum()), 1)
+
+    with torch.no_grad():
+        data_mae = torch.mean(torch.abs(model(batch.beams) - batch.measurements)).item()
+
+    return {
+        "obstacle_leakage": float(np.mean(final_map[occupied])) if occupied.any() else 0.0,
+        "obstacle_max": float(np.max(final_map[occupied])) if occupied.any() else 0.0,
+        "free_mae": float(np.sum(np.abs(final_map[free] - ground_truth[free])) / free_area),
+        "boundary_mae": float(np.sum(np.abs(final_map[boundary] - ground_truth[boundary])) / boundary_area),
+        "global_rmse": float(rmse_loss(ground_truth, final_map)),
+        "data_mae": data_mae,
+        "num_gaussians": float(model.num_gaussians),
+    }
+
+
+def run_test(
+    scenario: str,
+    penalty_weight: float,
+    cfg: Config,
+    data: tuple[MeasurementBatch, EnvironmentContext],
+    seed: int | None,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Train and evaluate one geometry/penalty combination."""
+    if seed is not None:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     batch, environment = data
-    
-    # --- Initialization ---
-    t0 = time.time()
-    model, _ = setup_gs_model(batch, cfg)
-    setup_time = time.time() - t0
-    print(f"Model initialized with {model.num_gaussians} Gaussians in {setup_time:.3f}s")
-    
-    # --- Training ---
-    trainer = Trainer(
-        model=model, 
-        cfg=cfg, 
-        environment=environment
-    )
-    
+    test_cfg = copy.deepcopy(cfg)
+    test_cfg.train.obstacle_lambda = penalty_weight
+
+    start_time = time.time()
+    model, _ = setup_gs_model(batch, test_cfg)
+    setup_time = time.time() - start_time
+    trainer = Trainer(model=model, cfg=test_cfg, environment=environment)
     batch_results = trainer.train(batch)
     training_results = trainer.finish()
-    
-    # --- Rename the generated GIF ---
-    default_gif_path = "plots/training_evolution.gif" 
-    
-    if os.path.exists(default_gif_path):
-        # Clean up the test name for a safe filename 
-        safe_test_name = test_name.replace(" ", "_").replace("(", "").replace(")", "").lower()
-        new_gif_path = f"plots/training_{safe_test_name}.gif"
-        
-        # Remove the destination file if it already exists to avoid errors
-        if os.path.exists(new_gif_path):
-            os.remove(new_gif_path)
-            
-        os.rename(default_gif_path, new_gif_path)
-        print(f"[{test_name}] Saved training GIF to {new_gif_path}")
-    
-    # Render final map to evaluate gas inside obstacles
-    final_map = model.render_map(cfg.env.cell_size)
-    gas_in_obstacles = np.sum(final_map * sim_data.obstacles)
-    
-    print(f"[{test_name}] Setup Time: {setup_time:.3f}s | Training Time: {training_results.training_time:.3f}s")
-    print(f"[{test_name}] Final Data Loss: {batch_results.final_loss:.5f}")
-    print(f"[{test_name}] Total Gas Inside Obstacles: {gas_in_obstacles:.5f}")
-    
-    return final_map, gas_in_obstacles, training_results.training_time
 
-def main():
-    # 1. Initialize Configuration
-    parser = ArgumentParser(description="Gas Splatting parameters")
+    final_map = model.render_map(test_cfg.env.cell_size)
+    metrics = calculate_metrics(final_map, batch, environment, model)
+    metrics.update({
+        "scenario": scenario,
+        "obstacle_lambda": penalty_weight,
+        "seed": seed,
+        "setup_time": setup_time,
+        "training_time": training_results.training_time,
+        "final_loss": batch_results.final_loss,
+    })
+    print(
+        f"{scenario:>14} | lambda={penalty_weight:<4g} | "
+        f"leak={metrics['obstacle_leakage']:.4f} | "
+        f"free MAE={metrics['free_mae']:.4f} | "
+        f"RMSE={metrics['global_rmse']:.4f}"
+    )
+    return final_map, metrics
+
+
+def plot_scenario(
+    scenario: str,
+    data: tuple[MeasurementBatch, EnvironmentContext],
+    results: dict[float, tuple[np.ndarray, dict[str, float]]],
+    cfg: Config,
+    output_dir: str,
+) -> None:
+    """Save a comparable ground-truth and reconstruction figure."""
+    batch, environment = data
+    ground_truth = environment.ground_truth.gas_map
+    maps = [ground_truth, *(item[0] for item in results.values())]
+    vmax = max(float(map_result.max()) for map_result in maps)
+    fig, axes = plt.subplots(1, len(results) + 1, figsize=(4 * (len(results) + 1), 4))
+    axes = np.atleast_1d(axes)
+    red_cmap = mcolors.ListedColormap(["none", "red"])
+
+    map_w, map_h = cfg.env.map_size
+    extent = (0.0, map_w, 0.0, map_h)
+    axes[0].imshow(ground_truth, origin="lower", vmin=0, vmax=vmax, cmap="viridis", extent=extent)
+    axes[0].set_title(f"Ground truth\n{scenario}")
+    for beam in batch.beams.detach().cpu().numpy():
+        axes[0].plot(
+            beam[:, 0],
+            beam[:, 1],
+            color="white", alpha=0.25, linewidth=0.5,
+        )
+    axes[0].imshow(environment.obstacles, cmap=red_cmap, origin="lower", alpha=0.45, extent=extent)
+
+    for axis, (penalty_weight, (map_result, metrics)) in zip(axes[1:], results.items()):
+        axis.imshow(map_result, origin="lower", vmin=0, vmax=vmax, cmap="viridis", extent=extent)
+        axis.imshow(environment.obstacles, cmap=red_cmap, origin="lower", alpha=0.45, extent=extent)
+        axis.set_title(
+            f"lambda={penalty_weight:g}\n"
+            f"leak={metrics['obstacle_leakage']:.3f}, "
+            f"free MAE={metrics['free_mae']:.3f}"
+        )
+
+    for axis in axes:
+        axis.set_xlim(0.0, map_w)
+        axis.set_ylim(0.0, map_h)
+        axis.axis("off")
+    fig.tight_layout()
+    os.makedirs(output_dir, exist_ok=True)
+    fig.savefig(os.path.join(output_dir, f"obstacles_{scenario}.png"), dpi=200)
+    plt.close(fig)
+
+
+def main() -> None:
+    parser = ArgumentParser(description="Compare obstacle geometries and penalties")
     parser.add_arguments(Config, dest="cfg")
+    parser.add_argument(
+        "--scenarios", nargs="+", choices=SCENARIOS, default=list(SCENARIOS),
+        help="Obstacle scenarios to run",
+    )
+    parser.add_argument(
+        "--penalty_weights", nargs="+", type=float, default=list(PENALTY_WEIGHTS),
+        help="Obstacle penalty weights to compare",
+    )
     args = parser.parse_args()
     cfg: Config = args.cfg
-    
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    seed = cfg.sim.seed
+    if seed is not None:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
     print(f"Using device: {cfg.device}")
-    
-    # Generate Environment
-    sim_data = create_toy_environment(cfg)
-    
-    results = {}
-    
-    # --- TEST 1: Baseline (No Obstacle Penalty) ---
-    cfg_baseline = copy.deepcopy(cfg)
-    cfg_baseline.train.obstacle_lambda = 0.0
-    map_base, gas_base, time_base = run_test("Baseline (No Penalty)", cfg_baseline, sim_data)
-    results['Baseline'] = {'map': map_base, 'gas_in_obs': gas_base, 'time': time_base}
-    
-    # --- TEST 2: SDF Repulsion (Lambda = 0.1) ---
-    cfg_sdf_low = copy.deepcopy(cfg)
-    cfg_sdf_low.train.obstacle_lambda = 0.1
-    map_sdf_low, gas_sdf_low, time_sdf_low = run_test("SDF Repulsion (Weight 0.1)", cfg_sdf_low, sim_data)
-    results['SDF_Low'] = {'map': map_sdf_low, 'gas_in_obs': gas_sdf_low, 'time': time_sdf_low}
-    
-    # --- TEST 3: SDF Repulsion (Lambda = 1.0) ---
-    cfg_sdf_high = copy.deepcopy(cfg)
-    cfg_sdf_high.train.obstacle_lambda = 1.0
-    map_sdf_high, gas_sdf_high, time_sdf_high = run_test("SDF Repulsion (Weight 1.0)", cfg_sdf_high, sim_data)
-    results['SDF_High'] = {'map': map_sdf_high, 'gas_in_obs': gas_sdf_high, 'time': time_sdf_high}
-    
-    # --- VISUALIZATION ---
-    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
-    
-    red_cmap = mcolors.ListedColormap(['none', 'red'])
-    
-    # Ground Truth
-    axes[0].imshow(environment.ground_truth.gas_map, origin='lower')
-    axes[0].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    
-    # Plot Beams (converted from meters to cell coordinates)
-    beams_np = batch.beams.cpu().numpy()
-    cell_size = cfg.env.cell_size
-    for i in range(beams_np.shape[0]):
-        x0 = beams_np[i, 0, 0] / cell_size
-        y0 = beams_np[i, 0, 1] / cell_size
-        x1 = beams_np[i, 1, 0] / cell_size
-        y1 = beams_np[i, 1, 1] / cell_size
-        axes[0].plot([x0, x1], [y0, y1], color='white', alpha=0.3, linewidth=0.8)
-        
-    axes[0].set_title("Ground Truth, Obstacle & Beams")
-    
-    # Baseline
-    axes[1].imshow(results['Baseline']['map'], origin='lower', vmin=0, vmax=environment.ground_truth.gas_map.max())
-    axes[1].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    axes[1].set_title(f"Baseline\nTime: {results['Baseline']['time']:.1f}s | Obs Gas: {results['Baseline']['gas_in_obs']:.1f}")
-    
-    # SDF Repulsion (Low Weight)
-    axes[2].imshow(results['SDF_Low']['map'], origin='lower', vmin=0, vmax=environment.ground_truth.gas_map.max())
-    axes[2].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    axes[2].set_title(f"SDF Repulsion (λ=0.1)\nTime: {results['SDF_Low']['time']:.1f}s | Obs Gas: {results['SDF_Low']['gas_in_obs']:.1f}")
-    
-    # SDF Repulsion (High Weight)
-    axes[3].imshow(results['SDF_High']['map'], origin='lower', vmin=0, vmax=environment.ground_truth.gas_map.max())
-    axes[3].imshow(sim_data.obstacles, cmap=red_cmap, origin='lower', interpolation='none', alpha=0.5)
-    axes[3].set_title(f"SDF Repulsion (λ=1.0)\nTime: {results['SDF_High']['time']:.1f}s | Obs Gas: {results['SDF_High']['gas_in_obs']:.1f}")
-    
-    # Set the limits of the axes to prevent the plot from expanding past the image boundaries
-    grid_w = int(cfg.env.map_size[0] / cfg.env.cell_size)
-    grid_h = int(cfg.env.map_size[1] / cfg.env.cell_size)
-    for ax in axes:
-        ax.set_xlim(-0.5, grid_w - 0.5)
-        ax.set_ylim(-0.5, grid_h - 0.5)
-        ax.axis('off')
-        
-    plt.tight_layout()
-    plt.show()
+    all_metrics = []
+    for scenario in args.scenarios:
+        print(f"\n--- Scenario: {scenario} ---")
+        if seed is not None:
+            np.random.seed(seed)
+        data = create_toy_environment(cfg, scenario)
+        scenario_results = {}
+        for penalty_weight in args.penalty_weights:
+            map_result, metrics = run_test(scenario, penalty_weight, cfg, data, seed)
+            scenario_results[penalty_weight] = (map_result, metrics)
+            all_metrics.append(metrics)
+        plot_scenario(scenario, data, scenario_results, cfg, os.path.join(root_dir, "plots"))
+
+    save_experiment_results(
+        metadata={
+            "experiment_name": "obstacle_geometry_comparison",
+            "scenarios": args.scenarios,
+            "penalty_weights": args.penalty_weights,
+            "seed": seed,
+            "map_size": cfg.env.map_size,
+            "cell_size": cfg.env.cell_size,
+        },
+        results=all_metrics,
+        folder=os.path.join(root_dir, "results"),
+    )
+
 
 if __name__ == "__main__":
     main()
