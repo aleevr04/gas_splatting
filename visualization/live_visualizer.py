@@ -308,7 +308,7 @@ class LiveVisualizer:
         self.frame_queue.put((frame_path, qimage))
         self.frame_count += 1
 
-    def save_gif(self, filepath="plots/training_evolution.gif"):
+    def save_gif(self, filepath):
         """Waits for all frames to be written, then generates a GIF from the captured frames using ffmpeg."""
         if self.frame_count == 0:
             print("Could not generate GIF. No frames captured.")

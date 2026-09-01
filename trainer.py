@@ -330,11 +330,11 @@ class Trainer:
 
         return BatchResults(final_loss=current_loss, batch_time=batch_time)
 
-    def finish(self):
+    def finish(self, gif_path: str = "plots/training.gif") -> TrainingResults:
         """Handles post-training cleanup and returns the global training history."""
         if self.visualizer:
             os.makedirs("plots", exist_ok=True)
-            self.visualizer.save_gif()
+            self.visualizer.save_gif(gif_path)
 
         del self.buffer_beams
         del self.buffer_measurements

@@ -14,6 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import Config
 from trainer import Trainer
+from gs_model import GasSplattingModel
 from utils.experiment_utils import rmse_loss, save_experiment_results
 from utils.init_utils import setup_gs_model
 from utils.obstacle_utils import SCENARIOS, create_obstacle_scenario, obstacle_mask_to_geometry
@@ -49,7 +50,7 @@ def create_toy_environment(
     obstacles = create_obstacle_scenario(scenario, (grid_h, grid_w))
 
     gas_gt = generate_fractal_gas_distribution(
-        grid_size=(grid_h, grid_w), scale_fraction=0.3, center_bias=0.0
+        grid_size=(grid_h, grid_w), scale_fraction=0.3, center_bias=0.5
     )
     gas_gt[obstacles > 0.5] = 0.0
 
@@ -79,8 +80,8 @@ def calculate_metrics(
     final_map: np.ndarray,
     batch: MeasurementBatch,
     environment: EnvironmentContext,
-    model: torch.nn.Module,
-) -> dict[str, float]:
+    model: GasSplattingModel,
+):
     """Calculate obstacle, reconstruction, and measurement metrics."""
     ground_truth = environment.ground_truth.gas_map
     occupied = environment.obstacles > 0.5
@@ -99,7 +100,7 @@ def calculate_metrics(
         "boundary_mae": float(np.sum(np.abs(final_map[boundary] - ground_truth[boundary])) / boundary_area),
         "global_rmse": float(rmse_loss(ground_truth, final_map)),
         "data_mae": data_mae,
-        "num_gaussians": float(model.num_gaussians),
+        "num_gaussians": model.num_gaussians,
     }
 
 
@@ -126,7 +127,7 @@ def run_test(
     setup_time = time.time() - start_time
     trainer = Trainer(model=model, cfg=test_cfg, environment=environment)
     batch_results = trainer.train(batch)
-    training_results = trainer.finish()
+    training_results = trainer.finish(gif_path=os.path.join("plots", f"training_{scenario}_lambda{penalty_weight}.gif"))
 
     final_map = model.render_map(test_cfg.env.cell_size)
     metrics = calculate_metrics(final_map, batch, environment, model)
@@ -161,7 +162,9 @@ def plot_scenario(
     vmax = max(float(map_result.max()) for map_result in maps)
     fig, axes = plt.subplots(1, len(results) + 1, figsize=(4 * (len(results) + 1), 4))
     axes = np.atleast_1d(axes)
-    red_cmap = mcolors.ListedColormap(["none", "red"])
+    white_cmap = mcolors.ListedColormap(["none", "white"])
+    obstacle_mask = environment.obstacles > 0.5
+    obstacle_boundary = binary_dilation(obstacle_mask, iterations=1) & ~obstacle_mask
 
     map_w, map_h = cfg.env.map_size
     extent = (0.0, map_w, 0.0, map_h)
@@ -173,11 +176,11 @@ def plot_scenario(
             beam[:, 1],
             color="white", alpha=0.25, linewidth=0.5,
         )
-    axes[0].imshow(environment.obstacles, cmap=red_cmap, origin="lower", alpha=0.45, extent=extent)
+    axes[0].imshow(obstacle_boundary.astype(float), cmap=white_cmap, origin="lower", alpha=1.0, extent=extent)
 
     for axis, (penalty_weight, (map_result, metrics)) in zip(axes[1:], results.items()):
         axis.imshow(map_result, origin="lower", vmin=0, vmax=vmax, cmap="viridis", extent=extent)
-        axis.imshow(environment.obstacles, cmap=red_cmap, origin="lower", alpha=0.45, extent=extent)
+        axis.imshow(obstacle_boundary.astype(float), cmap=white_cmap, origin="lower", alpha=1.0, extent=extent)
         axis.set_title(
             f"lambda={penalty_weight:g}\n"
             f"leak={metrics['obstacle_leakage']:.3f}, "
