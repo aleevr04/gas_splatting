@@ -103,13 +103,13 @@ def main():
     
     # Handle the first subplot (GT) conditionally
     if gt_img is not None:
-        im_gt = axes[0].imshow(gt_img, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
+        im_gt = axes[0].imshow(gt_img, origin='lower', extent=extent, cmap='viridis', vmin=vmin_global, vmax=vmax_global)
         axes[0].set_title("Ground Truth")
         data_range = gt_img.max() - gt_img.min()
     else:
         # Create a blank canvas to plot the beams if no GT exists
         empty_map = np.zeros(grid_size)
-        im_gt = axes[0].imshow(empty_map, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
+        im_gt = axes[0].imshow(empty_map, origin='lower', extent=extent, cmap='viridis', vmin=vmin_global, vmax=vmax_global)
         axes[0].set_title("Sensor Beam Setup")
 
     axes[0].axis('off')
@@ -130,7 +130,7 @@ def main():
         else:
             print(f"{name:<20}: Total Time = {t_total:.2f}s")
             
-        axes[idx].imshow(img, origin='lower', extent=extent, cmap='jet', vmin=vmin_global, vmax=vmax_global)
+            axes[idx].imshow(img, origin='lower', extent=extent, cmap='viridis', vmin=vmin_global, vmax=vmax_global)
         axes[idx].set_title(name)
         axes[idx].axis('off')
         
@@ -162,7 +162,7 @@ def main():
                 global_max_err = err_map.max()
 
         for idx, (name, err_map) in enumerate(error_maps.items()):
-            im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='hot', vmin=0, vmax=global_max_err)
+            im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='viridis', vmin=0, vmax=global_max_err)
             axes_err[idx].set_title(name)
             axes_err[idx].axis('off')
 

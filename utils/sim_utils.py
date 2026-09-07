@@ -244,6 +244,7 @@ def generate_obstacle_aware_beams(
     beams = []
     candidate_count = max(num_beams * 10, 100)
     candidate_beams = generate_simple_beams(map_size_m, candidate_count, seed=seed)
+    np.random.shuffle(candidate_beams)
 
     for (x0, y0), (x1, y1) in candidate_beams:
         line = LineString([(x0, y0), (x1, y1)])

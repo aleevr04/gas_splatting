@@ -82,14 +82,14 @@ def main():
 
     # Panel 1: Original
     ax_orig = fig.add_subplot(gs[0, 0])
-    ax_orig.imshow(img_orig.numpy(), extent=(-10, 10, -10, 10), cmap='jet', origin='lower')
+    ax_orig.imshow(img_orig.numpy(), extent=(-10, 10, -10, 10), cmap='viridis', origin='lower')
     ax_orig.set_title("Original Gaussian")
     ax_orig.axis('off')
 
     # Top Panels: Different 'c' splits
     for i, (title, img) in enumerate(saved_images.items()):
         ax = fig.add_subplot(gs[0, i+1])
-        ax.imshow(img, extent=(-10, 10, -10, 10), cmap='jet', origin='lower', vmax=float(img_orig.max()))
+        ax.imshow(img, extent=(-10, 10, -10, 10), cmap='viridis', origin='lower', vmax=float(img_orig.max()))
         ax.set_title(f"Split ({title})")
         ax.axis('off')
 

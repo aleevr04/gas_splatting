@@ -70,15 +70,15 @@ def main():
     
     # GT
     axes1[0].set_title("Ground Truth")
-    im_gt = axes1[0].imshow(gt_img, origin='lower', extent=extent, cmap='jet', vmin=vmin, vmax=vmax)
+    im_gt = axes1[0].imshow(gt_img, origin='lower', extent=extent, cmap='viridis', vmin=vmin, vmax=vmax)
     
     # Original Densification Recon
     axes1[1].set_title(methods[0])
-    axes1[1].imshow(results[methods[0]]["img"], origin='lower', extent=extent, cmap='jet', vmin=vmin, vmax=vmax)
+    axes1[1].imshow(results[methods[0]]["img"], origin='lower', extent=extent, cmap='viridis', vmin=vmin, vmax=vmax)
     
     # Proposed Strategy Recon
     axes1[2].set_title(methods[1])
-    axes1[2].imshow(results[methods[1]]["img"], origin='lower', extent=extent, cmap='jet', vmin=vmin, vmax=vmax)
+    axes1[2].imshow(results[methods[1]]["img"], origin='lower', extent=extent, cmap='viridis', vmin=vmin, vmax=vmax)
     
     # Shared colorbar
     fig1.colorbar(im_gt, ax=axes1.tolist(), label="ppm", fraction=0.015, pad=0.04)

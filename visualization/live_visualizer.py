@@ -27,7 +27,7 @@ THEME = {
     'axis_text': '#6b7280',     # Color for the numerical tick values on the graphs
     
     # Plotting & Visuals
-    'colormap': 'turbo',
+    'colormap': 'viridis',
     'grid_alpha': 0.10,   # Opacity (0.0 to 1.0) of the background grid in the loss plot
 
     # Accents & Data Points
@@ -195,9 +195,8 @@ class LiveVisualizer:
         self.p_gt.addItem(self.img_gt_item)
 
         # Colormap for maps
-        cmap = pg.colormap.get(THEME['colormap'])
-        self.img_map_item.setColorMap(cmap)
-        self.img_gt_item.setColorMap(cmap)
+        self.img_map_item.setColorMap(THEME['colormap'])
+        self.img_gt_item.setColorMap(THEME['colormap'])
 
         # Loss Curve (Row 1, Cols 0-2)
         custom_y_axis = CleanLogAxis(orientation='left')

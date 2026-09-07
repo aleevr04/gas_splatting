@@ -23,7 +23,7 @@ def plot_real_results(model: GasSplattingModel, batch_data: MeasurementBatch, re
     
     # --- Reconstruction ---
     ax_map.set_title(f"GS Reconstruction (cell size = {cfg.env.cell_size}m)\nGaussians: {model.num_gaussians}")
-    im = ax_map.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet')
+    im = ax_map.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis')
     
     ax_map.set_xlim(0, map_w)
     ax_map.set_ylim(0, map_h)

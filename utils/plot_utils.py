@@ -47,11 +47,11 @@ def plot_initial_guess(img_gt: np.ndarray | None, init_data: InitializationData,
         vmax = max(img_gt.max(), 1e-3) # Prevent vmax=0 warnings
 
         ax1.set_title(f"Ground Truth ({img_gt.shape[0]}x{img_gt.shape[1]})")
-        im = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=0, vmax=vmax)
+        im = ax1.imshow(img_gt, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis', vmin=0, vmax=vmax)
         fig.colorbar(im, ax=ax1, label="ppm", fraction=0.046, pad=0.04)
 
         ax2.set_title("Initialization")
-        ax2.imshow(background, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=0, vmax=1)
+        ax2.imshow(background, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis', vmin=0, vmax=1)
         ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Positions')
         ax2.legend()
 
@@ -60,7 +60,7 @@ def plot_initial_guess(img_gt: np.ndarray | None, init_data: InitializationData,
         fig, ax2 = plt.subplots(1, 1, figsize=(7, 5))
         
         ax2.set_title("Initialization")
-        ax2.imshow(background, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=0, vmax=1)
+        ax2.imshow(background, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis', vmin=0, vmax=1)
         ax2.scatter(init_pos[:, 0], init_pos[:, 1], marker='X', c='w', edgecolors='k', s=90, linewidths=1.2, label='Positions')
         ax2.legend()
         
@@ -102,7 +102,7 @@ def plot_training_results(gaussians: GasSplattingModel, batch: MeasurementBatch,
     # 1. GT (Top Left)
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_title(f"Ground Truth ({grid_w}x{grid_h})")
-    im1 = ax1.imshow(ground_truth, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+    im1 = ax1.imshow(ground_truth, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis', vmin=vmin, vmax=vmax)
     for i in range(len(batch.beams)):
         (x0, y0), (x1, y1) = batch.beams[i]
         ax1.plot([x0, x1], [y0, y1], 'w-', alpha=0.3, linewidth=1.0)
@@ -111,13 +111,13 @@ def plot_training_results(gaussians: GasSplattingModel, batch: MeasurementBatch,
     ax2 = fig.add_subplot(gs[0, 1])
     pos = gaussians.get_pos().detach().cpu().numpy()
     ax2.set_title("GS Reconstruction")
-    ax2.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax, interpolation='bilinear')
+    ax2.imshow(img_pred_gaussian, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis', vmin=vmin, vmax=vmax, interpolation='bilinear')
     ax2.scatter(pos[:, 0], pos[:, 1], marker='P', c='k', edgecolors='w', s=30, linewidths=1.0)
 
     # 3. Reconstruction Grid (Top Right)
     ax3 = fig.add_subplot(gs[0, 2])
     ax3.set_title(f"GS Reconstruction (Grid)\nRMSE = {rmse:.4f}")
-    ax3.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='jet', vmin=vmin, vmax=vmax)
+    ax3.imshow(img_pred, origin='lower', extent=(0, map_w, 0, map_h), cmap='viridis', vmin=vmin, vmax=vmax)
 
     # Single Colorbar
     fig.colorbar(im1, ax=[ax1, ax2, ax3], label="ppm", fraction=0.015, pad=0.02)
