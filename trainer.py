@@ -235,7 +235,8 @@ class Trainer:
             beams=self.buffer_beams,
             importance_scores=residuals,
             min_dist=init_scale,
-            device=self.cfg.device
+            device=self.cfg.device,
+            existing_pos=self.model.get_pos().detach()
         )
         
         num_injected = final_pos.shape[0]

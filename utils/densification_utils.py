@@ -1,8 +1,8 @@
 import torch
 
-def extract_candidate_positions(beams: torch.Tensor, importance_scores: torch.Tensor, min_dist: float, device: torch.device) -> torch.Tensor:
+def extract_candidate_positions(beams: torch.Tensor, importance_scores: torch.Tensor, min_dist: float, device: torch.device, existing_pos: torch.Tensor | None = None) -> torch.Tensor:
     """
-    Extracts optimal locations for new Gaussians by computing geometric intersections 
+    Extracts optimal locations for new Gaussians by computing geometric intersections
     of anomalous beams and applying Continuous Spatial NMS.
 
     Args:
@@ -10,7 +10,10 @@ def extract_candidate_positions(beams: torch.Tensor, importance_scores: torch.Te
         importance_scores: Tensor of shape (N,) representing the metric to evaluate (measurements or residuals).
         min_dist: Minimum spatial distance between generated points to avoid redundancy.
         device: Torch device.
-        
+        existing_pos: Optional tensor of shape (K, 2) with positions of already-placed Gaussians.
+            Candidates within min_dist of any of these are discarded before NMS. Pass None
+            (e.g. during initialization, when no Gaussians exist yet) to skip this filter.
+
     Returns:
         Tensor of shape (M, 2) with the filtered candidate positions.
     """
@@ -74,7 +77,16 @@ def extract_candidate_positions(beams: torch.Tensor, importance_scores: torch.Te
     intersections = torch.stack([px, py], dim=-1)
     int_scores = candidate_scores[i[keep_mask]] + candidate_scores[j[keep_mask]]
 
-    # 3. Continuous Spatial Non-Maximum Suppression (NMS)
+    # 3. Discard candidates too close to already-placed Gaussians
+    if existing_pos is not None and existing_pos.shape[0] > 0:
+        dist_to_existing = torch.cdist(intersections, existing_pos)
+        novel_mask = torch.min(dist_to_existing, dim=1).values >= min_dist
+        if not novel_mask.any():
+            return torch.empty((0, 2), device=device)
+        intersections = intersections[novel_mask]
+        int_scores = int_scores[novel_mask]
+
+    # 4. Continuous Spatial Non-Maximum Suppression (NMS)
     sorted_idx = torch.argsort(int_scores, descending=True)
     sorted_points = intersections[sorted_idx]
     
