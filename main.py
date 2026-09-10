@@ -57,6 +57,7 @@ def main():
         "setup_time": setup_time,
         "training_time": results.training_time,
         "loss_history": results.loss_history,
+        "full_loss_history": results.full_loss_history,
         "rmse_history": results.rmse_history,
         "densify_history": results.densify_history
     }

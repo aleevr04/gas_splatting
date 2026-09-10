@@ -22,6 +22,7 @@ class BatchResults:
 @dataclass
 class TrainingResults:
     loss_history: List[float] = field(default_factory=list)
+    full_loss_history: Dict[int, float] = field(default_factory=dict)
     densify_history: Dict[int, dict] = field(default_factory=dict)
     rmse_history: Dict[int, float] = field(default_factory=dict)
     training_time: float = 0.0
@@ -125,6 +126,51 @@ class Trainer:
             max_steps=cfg.train.iterations
         )
 
+    @property
+    def minibatching(self) -> bool:
+        """True when the buffer is larger than the configured beam minibatch."""
+        batch_size = self.cfg.train.beam_batch_size
+
+        return batch_size > 0 and self.buffer_beams.shape[0] > batch_size
+
+    def sample_beam_batch(self):
+        """
+        Draws the beams used by a single optimization step.
+
+        Returns the whole buffer unless cfg.train.beam_batch_size requests a smaller
+        minibatch, in which case beams are sampled uniformly without replacement.
+
+        Returns:
+            (beams, measurements, weights): Tensors of shape (B, 2, 2), (B,) and (B,)
+        """
+        if not self.minibatching:
+            return self.buffer_beams, self.buffer_measurements, self.buffer_weights
+
+        perm = torch.randperm(self.buffer_beams.shape[0], device=self.buffer_beams.device)
+        idx = perm[:self.cfg.train.beam_batch_size]
+
+        return self.buffer_beams[idx], self.buffer_measurements[idx], self.buffer_weights[idx]
+
+    @torch.no_grad()
+    def predict_buffer(self) -> torch.Tensor:
+        """Model prediction over the whole beam buffer, chunked to bound memory."""
+        chunk = max(1, self.cfg.train.eval_chunk_size)
+        num_beams = self.buffer_beams.shape[0]
+
+        if num_beams == 0:
+            return torch.empty((0,), device=self.cfg.device)
+
+        preds = [self.model(self.buffer_beams[i:i + chunk]) for i in range(0, num_beams, chunk)]
+
+        return torch.cat(preds)
+
+    @torch.no_grad()
+    def full_data_loss(self) -> float:
+        """Weighted measurement loss over the whole buffer, used as early stopping monitor."""
+        y_pred = self.predict_buffer()
+
+        return torch.mean(self.buffer_weights * torch.abs(y_pred - self.buffer_measurements)).item()
+
     def is_densify_it(self, iteration: int):
         return (iteration > self.cfg.densify.densify_from and 
                 iteration < self.cfg.densify.densify_until and
@@ -160,8 +206,10 @@ class Trainer:
     def optimization_step(self, iteration: int):
         """Executes a single optimization step (Forward + Backward + Step)."""
         self.optimizer.zero_grad()
-        
-        y_pred = self.model(self.buffer_beams)
+
+        beams, measurements, weights = self.sample_beam_batch()
+
+        y_pred = self.model(beams)
 
         # Weigthed measurements loss
         data_loss = torch.mean(self.buffer_weights * torch.abs(y_pred - self.buffer_measurements))
@@ -234,7 +282,7 @@ class Trainer:
 
     def inject_gaussians(self) -> int:
         """Injects new Gaussians based on high-error beams using Continuous Spatial NMS."""
-        y_pred = self.model(self.buffer_beams)
+        y_pred = self.predict_buffer()
         residuals = self.buffer_measurements - y_pred
         
         # Dynamic scale
@@ -265,6 +313,7 @@ class Trainer:
 
         # Early stopping init
         ema_loss = None
+        monitored_loss = float('inf')
         best_ema_loss = float('inf')
         patience_counter = 0
 
@@ -280,11 +329,20 @@ class Trainer:
             self.results.loss_history.append(current_loss)
 
             # --- Early stopping ---
+            # A minibatch loss is a noisy estimate of the objective, so the monitored
+            # signal is the loss over the whole buffer, refreshed periodically.
+            if self.minibatching:
+                if iteration % self.cfg.train.full_loss_interval == 0:
+                    monitored_loss = self.full_data_loss()
+                    self.results.full_loss_history[self.global_iteration] = monitored_loss
+            else:
+                monitored_loss = current_loss
+
             # Update the smoothed EMA loss
             if ema_loss is None:
-                ema_loss = current_loss
+                ema_loss = monitored_loss
             else:
-                ema_loss = (self.cfg.train.ema_alpha * current_loss) + ((1 - self.cfg.train.ema_alpha) * ema_loss)
+                ema_loss = (self.cfg.train.ema_alpha * monitored_loss) + ((1 - self.cfg.train.ema_alpha) * ema_loss)
 
             if iteration > self.cfg.densify.densify_until:
                 # Check for significant improvement

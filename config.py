@@ -27,6 +27,10 @@ class TrainParams:
 
     iterations: int = 1500 # Max number of iterations
 
+    beam_batch_size: int = 0 # Beams sampled per optimization step (0 = use the whole buffer)
+    full_loss_interval: int = 25 # Interval to re-evaluate the loss over the whole buffer (early stopping monitor when minibatching)
+    eval_chunk_size: int = 4096 # Max beams per chunk in no-grad full-buffer evaluations
+
     obstacle_lambda: float = 0.1 # Weight for the obstacle penalty term in the loss function
 
     early_stopping_patience: int = 100      # How many iterations to wait for an improvement
