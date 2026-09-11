@@ -165,7 +165,14 @@ class Trainer:
 
         # Weigthed measurements loss
         data_loss = torch.mean(self.buffer_weights * torch.abs(y_pred - self.buffer_measurements))
-        total_loss = data_loss
+
+        # Backward the data loss on its own so the densification gradient
+        # accumulator only reflects gradients coming from the measurements,
+        # not the obstacle prior below.
+        data_loss.backward()
+        self.model.update_accum_gradient()
+
+        total_loss = data_loss.item()
 
         # Directional SDF repulsion loss
         if self.sdf_tensor is not None and self.sdf_grad_tensor is not None:
@@ -212,15 +219,18 @@ class Trainer:
             violations = F.relu(margin - sdf_at_pos)
             sdf_penalty = torch.sum(violations * concentrations)
             
-            obstacle_lambda = getattr(self.cfg.train, 'obstacle_lambda', 0.1)
-            total_loss = total_loss + (obstacle_lambda * sdf_penalty)
+            obstacle_loss = self.cfg.train.obstacle_lambda * sdf_penalty
 
-        total_loss.backward()
-        self.model.update_accum_gradient()
+            # Backward separately: this adds to the gradients already left by
+            # data_loss (used by the optimizer step), but is deliberately not
+            # followed by update_accum_gradient so it never affects densification.
+            obstacle_loss.backward()
+            total_loss += obstacle_loss.item()
+
         self.update_learning_rates(iteration)
         self.optimizer.step()
-        
-        return total_loss.item()
+
+        return total_loss
 
     def inject_gaussians(self) -> int:
         """Injects new Gaussians based on high-error beams using Continuous Spatial NMS."""
