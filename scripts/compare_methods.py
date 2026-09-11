@@ -129,8 +129,8 @@ def main():
             print(f"{name:<20}: RMSE = {rmse:.4f} | SSIM = {ssim_val:.4f} | Total Time = {t_total:.2f}s")
         else:
             print(f"{name:<20}: Total Time = {t_total:.2f}s")
-            
-            axes[idx].imshow(img, origin='lower', extent=extent, cmap='viridis', vmin=vmin_global, vmax=vmax_global)
+
+        axes[idx].imshow(img, origin='lower', extent=extent, cmap='viridis', vmin=vmin_global, vmax=vmax_global)
         axes[idx].set_title(name)
         axes[idx].axis('off')
         
@@ -162,7 +162,7 @@ def main():
                 global_max_err = err_map.max()
 
         for idx, (name, err_map) in enumerate(error_maps.items()):
-            im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='viridis', vmin=0, vmax=global_max_err)
+            im_err = axes_err[idx].imshow(err_map, origin='lower', extent=extent, cmap='inferno', vmin=0, vmax=global_max_err)
             axes_err[idx].set_title(name)
             axes_err[idx].axis('off')
 
