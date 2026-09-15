@@ -198,9 +198,11 @@ class GasSplattingModel(nn.Module):
         w_cells = int(map_w / cell_size)
         h_cells = int(map_h / cell_size)
 
-        # Grid setup
-        x = torch.linspace(0, map_w, w_cells, device=device)
-        y = torch.linspace(0, map_h, h_cells, device=device)
+        # Grid setup. Cells are sampled at their center, the same convention
+        # the ground truth and the obstacle mask use, so that the rendered map
+        # lines up with them cell for cell
+        x = (torch.arange(w_cells, device=device) + 0.5) * cell_size
+        y = (torch.arange(h_cells, device=device) + 0.5) * cell_size
         X, Y = torch.meshgrid(x, y, indexing='xy')
         grid_pos = torch.stack([X, Y], dim=-1) # (H, W, 2)
 
