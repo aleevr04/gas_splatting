@@ -66,8 +66,15 @@ class Trainer:
             dist_outside = np.asarray(ndimage.distance_transform_edt(free_space))
             dist_inside = np.asarray(ndimage.distance_transform_edt(occupied_space))
 
-            # SDF field in meters
-            sdf_physical = (dist_outside - dist_inside) * cfg.env.cell_size
+            # SDF field in meters. The transform measures to the center of the
+            # nearest occupied cell, but the surface it stands for is half a
+            # cell nearer, so take that off the magnitude. Without it this term
+            # would sit half a cell more lenient than the axis distances below,
+            # even though both are held to the same margin.
+            sdf_cells = dist_outside - dist_inside
+            sdf_physical = np.where(
+                sdf_cells > 0, sdf_cells - 0.5, sdf_cells + 0.5
+            ) * cfg.env.cell_size
 
             # Compute spatial gradients (normals) using numpy
             # np.gradient returns (gradient_y, gradient_x) for a 2D array
