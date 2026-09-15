@@ -12,6 +12,7 @@ from config import Config
 from gs_model import GasSplattingModel
 from utils.sim_utils import EnvironmentContext, MeasurementBatch
 from utils.densification_utils import extract_candidate_positions
+from utils.obstacle_utils import compute_wall_distance_field
 
 
 @dataclass
@@ -52,42 +53,57 @@ class Trainer:
         self.results = TrainingResults()
         self.global_iteration = 0
 
-        # --- Process obstacles to compute SDF and gradients ---
+        # --- Process obstacles into the fields used by the obstacle penalization ---
         self.sdf_tensor = None
         self.sdf_grad_tensor = None
-        
+        self.wall_dist_tensor = None
+
         if environment and environment.obstacles is not None:
             obstacles = environment.obstacles
             free_space = (obstacles <= 0.5)
             occupied_space = (obstacles > 0.5)
-            
+
             dist_outside = np.asarray(ndimage.distance_transform_edt(free_space))
             dist_inside = np.asarray(ndimage.distance_transform_edt(occupied_space))
-            
+
             # SDF field in meters
             sdf_physical = (dist_outside - dist_inside) * cfg.env.cell_size
-            
+
             # Compute spatial gradients (normals) using numpy
             # np.gradient returns (gradient_y, gradient_x) for a 2D array
             grad_y, grad_x = np.gradient(sdf_physical)
-            
+
             # Stack into (2, H, W)
             sdf_grad_physical = np.stack([grad_x, grad_y], axis=0)
-            
+
             # Store SDF as (1, 1, H, W)
             self.sdf_tensor = torch.tensor(
-                sdf_physical, 
-                dtype=torch.float32, 
+                sdf_physical,
+                dtype=torch.float32,
                 device=self.cfg.device
             ).unsqueeze(0).unsqueeze(0)
-            
+
             # Store Gradients as (1, 2, H, W)
             self.sdf_grad_tensor = torch.tensor(
                 sdf_grad_physical,
                 dtype=torch.float32,
                 device=self.cfg.device
             ).unsqueeze(0)
-        # ----------------------------------------------------
+
+            # Distance to the nearest wall along each ray axis, in meters
+            wall_distances = compute_wall_distance_field(
+                environment.obstacles,
+                cell_size=cfg.env.cell_size,
+                max_dist=float(max(cfg.env.map_size)),
+            )
+
+            # Store as (1, 2, H, W): horizontal and vertical
+            self.wall_dist_tensor = torch.tensor(
+                wall_distances,
+                dtype=torch.float32,
+                device=self.cfg.device
+            ).unsqueeze(0)
+        # -------------------------------------------------------------------
         
         # Data Buffers
         self.max_buffer_size = max_buffer_size or float('inf')
@@ -142,7 +158,7 @@ class Trainer:
                 param_group["lr"] = self.concentration_lr_func(iteration)
 
     def update_buffers(self, batch_data: MeasurementBatch):
-        """Merges new incoming data into the training buffers, applying weight decay to older data."""
+        """Merges new incoming data into the training buffers"""
         # New measurements have maximum importance
         new_weights = torch.ones_like(batch_data.measurements)
 
@@ -168,14 +184,24 @@ class Trainer:
 
         # Backward the data loss on its own so the densification gradient
         # accumulator only reflects gradients coming from the measurements,
-        # not the obstacle prior below.
+        # not the obstacle penalization below.
         data_loss.backward()
         self.model.update_accum_gradient()
 
         total_loss = data_loss.item()
 
-        # Directional SDF repulsion loss
-        if self.sdf_tensor is not None and self.sdf_grad_tensor is not None:
+        # --- Obstacle penalization ---
+        # Two complementary penalties sharing one weight and one margin. Neither
+        # subsumes the other: the SDF knows the exact distance to the closest
+        # surface in any direction but only to that one surface, while the axis
+        # distances know every wall around the Gaussian but measure them along
+        # fixed directions, which overestimates how far away they really are.
+        use_obstacles = (self.sdf_tensor is not None
+                         and self.sdf_grad_tensor is not None
+                         and self.wall_dist_tensor is not None
+                         and self.cfg.train.obstacle_lambda > 0.0)
+
+        if use_obstacles:
             pos = self.model.get_pos()                      # (K, 2)
             Sigma = self.model.get_covariance()             # (K, 2, 2)
             concentrations = self.model.get_concentration() # (K,)
@@ -185,47 +211,73 @@ class Trainer:
             norm_x = (pos[:, 0] / map_w) * 2.0 - 1.0
             norm_y = (pos[:, 1] / map_h) * 2.0 - 1.0
             grid = torch.stack([norm_x, norm_y], dim=-1).view(1, 1, -1, 2) # (1, 1, K, 2)
-            
+
+            # --- Directional SDF repulsion ---
             # Sample SDF distance: (1, 1, 1, K) -> (K,)
             sdf_at_pos = F.grid_sample(
-                self.sdf_tensor, grid, 
+                self.sdf_tensor, grid,
                 mode='bilinear', padding_mode='border', align_corners=False
             ).view(-1)
-            
+
             # Sample SDF gradient: (1, 2, 1, K) -> (K, 2)
             grad_at_pos = F.grid_sample(
-                self.sdf_grad_tensor, grid, 
+                self.sdf_grad_tensor, grid,
                 mode='bilinear', padding_mode='border', align_corners=False
             ).squeeze(0).squeeze(1).transpose(0, 1)
-            
+
             # Normalize to get the unit normal vector 'n'
             # Add small epsilon to avoid division by zero if gradient is flat
             n = F.normalize(grad_at_pos, p=2, dim=-1, eps=1e-6) # (K, 2)
-            
-            # Calculate directional variance: n^T * Sigma * n
-            n_unsq_left = n.unsqueeze(1)  # (K, 1, 2)
-            n_unsq_right = n.unsqueeze(-1) # (K, 2, 1)
-            
+
+            # Directional variance n^T * Sigma * n
             # (K, 1, 2) @ (K, 2, 2) @ (K, 2, 1) -> (K, 1, 1) -> (K,)
-            directional_variance = torch.bmm(n_unsq_left, torch.bmm(Sigma, n_unsq_right)).view(-1)
-            
-            # Standard deviation in the direction of the wall
-            sigma_n = torch.sqrt(torch.clamp(directional_variance, min=1e-7))
-            
-            # Dynamic margin: 2 std deviations along the normal
-            margin = 2.0 * sigma_n
-            
-            # Calculate penalty
-            violations = F.relu(margin - sdf_at_pos)
-            sdf_penalty = torch.sum(violations * concentrations)
-            
-            obstacle_loss = self.cfg.train.obstacle_lambda * sdf_penalty
+            sdf_variance = torch.bmm(
+                n.unsqueeze(1), torch.bmm(Sigma, n.unsqueeze(-1))
+            ).view(-1)
+
+            # Standard deviation in the direction of the closest surface
+            sigma_n = torch.sqrt(torch.clamp(sdf_variance, min=1e-7))
+
+            sdf_violations = F.relu(self.cfg.train.obstacle_sigma_k * sigma_n - sdf_at_pos)
+
+            # --- Per-axis repulsion ---
+            # Sample both distances: (1, 2, 1, K) -> (K, 2)
+            wall_dist = F.grid_sample(
+                self.wall_dist_tensor, grid,
+                mode='bilinear', padding_mode='border', align_corners=False
+            ).squeeze(0).squeeze(1).transpose(0, 1)
+
+            # Directional variance n^T * Sigma * n along each axis. The field
+            # is measured along x and then y, and for those unit vectors the
+            # projection is just the diagonal of Sigma: (K, 2)
+            axis_variance = torch.diagonal(Sigma, dim1=1, dim2=2)
+
+            # Standard deviation in the direction of each wall
+            sigma_axis = torch.sqrt(torch.clamp(axis_variance, min=1e-7))
+
+            # Dynamic margin: a few standard deviations along every axis
+            margin = self.cfg.train.obstacle_sigma_k * sigma_axis
+
+            # Calculate penalty. Weighting by concentration keeps the prior in
+            # proportion to the data term: predictions are a concentration
+            # weighted sum of Gaussians, so the data gradient on a Gaussian
+            # scales with its concentration too, and without this factor faint
+            # Gaussians would be shoved around by the prior far harder than the
+            # strong ones actually responsible for the leaked gas. It is
+            # detached so that fading a Gaussian out is not a way of dodging the
+            # penalty, leaving only moving or reshaping it.
+            violations = F.relu(margin - wall_dist)
+            total_violation = sdf_violations + violations.sum(dim=-1)
+            obstacle_loss = self.cfg.train.obstacle_lambda * torch.sum(
+                total_violation * concentrations.detach()
+            )
 
             # Backward separately: this adds to the gradients already left by
             # data_loss (used by the optimizer step), but is deliberately not
             # followed by update_accum_gradient so it never affects densification.
             obstacle_loss.backward()
             total_loss += obstacle_loss.item()
+        # ----------------------
 
         self.update_learning_rates(iteration)
         self.optimizer.step()
